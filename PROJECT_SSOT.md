@@ -1,7 +1,7 @@
 # PROJECT SSOT
 
-Project: Agent Delivery Acceptance Gate
-Chinese name: Agent 交付验收门禁
+Project: Agent Acceptance Gate
+Chinese name: Agent 验收门禁
 Status: local_repo_private
 Owner thread: product_distribution / cmd5
 Created: 2026-07-02
@@ -69,4 +69,3 @@ Expected:
 PASS 5/5 sample audit cases
 PASS http smoke
 ```
-

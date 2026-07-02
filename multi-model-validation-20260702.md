@@ -119,7 +119,7 @@ Better buyer-facing name:
 
 English positioning:
 
-`Agent Delivery Acceptance Gate`
+`Agent Acceptance Gate`
 
 Avoid:
 
@@ -149,4 +149,3 @@ If Leo wants public release after reviewing the local demo, choose one explicit 
 4. OKX.AI ASP listing.
 
 Options 2-4 are public/repo/deploy/account gates and require explicit confirmation before action.
-

@@ -8,9 +8,8 @@ const host = process.env.HOST ?? '127.0.0.1';
 const server = createServer();
 
 server.listen(port, host, () => {
-  console.log(`Agent Delivery Acceptance Gate demo`);
+  console.log(`Agent Acceptance Gate demo`);
   console.log(`Demo:   http://${host}:${port}/`);
   console.log(`Health: http://${host}:${port}/health`);
   console.log(`API:    POST http://${host}:${port}/audit-agent-deliverable`);
 });
-

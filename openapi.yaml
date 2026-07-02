@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Agent Delivery Acceptance Gate
+  title: Agent Acceptance Gate
   version: 0.1.0
   description: |
     Local-only API draft for auditing AI agent deliveries before acceptance,
@@ -171,4 +171,3 @@ components:
           type: array
           items:
             type: string
-

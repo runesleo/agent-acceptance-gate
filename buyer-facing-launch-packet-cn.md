@@ -8,7 +8,7 @@ Agent 交付验收器
 
 English subtitle:
 
-Agent Delivery Acceptance Gate
+Agent Acceptance Gate
 
 ## One-liner
 
@@ -72,7 +72,7 @@ Do not submit yet.
 Future listing should use:
 
 ```text
-Agent Delivery Acceptance Gate
+Agent Acceptance Gate
 Audits AI agent deliveries before acceptance, payment release, or dispute review.
 ```
 
@@ -103,4 +103,3 @@ Not ready:
 - privacy / terms;
 - rate limit / abuse handling;
 - real buyer demand proof.
-

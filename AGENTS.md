@@ -4,7 +4,7 @@ Default communication: Chinese.
 
 ## Scope
 
-This repo is a local-only prototype for `Agent Delivery Acceptance Gate`.
+This repo is a local-only prototype for `Agent Acceptance Gate`.
 
 It should stay agent-first and human-readable:
 
@@ -39,4 +39,3 @@ Primary positioning:
 ```text
 Can this agent delivery be accepted?
 ```
-

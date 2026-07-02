@@ -17,7 +17,7 @@ export function createServer() {
       if (req.method === 'GET' && url.pathname === '/health') {
         return sendJson(res, 200, {
           ok: true,
-          service: 'agent-delivery-acceptance-gate',
+          service: 'agent-acceptance-gate',
           mode: 'local_only'
         });
       }

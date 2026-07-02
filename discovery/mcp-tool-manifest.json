@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1",
   "server": {
-    "name": "agent-delivery-acceptance-gate",
+    "name": "agent-acceptance-gate",
     "description": "MCP/API service for auditing AI agent deliveries before acceptance, payment release, or dispute review.",
     "status": "local_only_not_published"
   },
@@ -81,4 +81,3 @@
     }
   ]
 }
-

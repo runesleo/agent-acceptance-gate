@@ -18,7 +18,7 @@ try {
   assert(Array.isArray(samples) && samples.length === 5, 'sample audits endpoint failed');
 
   const discovery = await fetch(`${base}/.well-known/agent-service.json`).then((res) => res.json());
-  assert(discovery.service_id === 'agent-delivery-acceptance-gate', 'agent discovery endpoint failed');
+  assert(discovery.service_id === 'agent-acceptance-gate', 'agent discovery endpoint failed');
   assert(discovery.call_when.includes('before_release_payment'), 'agent discovery missing call_when');
 
   const manifest = await fetch(`${base}/mcp-tool-manifest.json`).then((res) => res.json());

@@ -1,4 +1,4 @@
-# Agent 市场生态分析：Agent 交付验收门禁
+# Agent 市场生态分析：Agent 验收门禁
 
 Created: 2026-07-02
 Status: local_research_synthesis
@@ -201,8 +201,8 @@ Agent Deliverable Auditor
 应该定位：
 
 ```text
-Agent Delivery Acceptance Gate
-Agent 交付验收门禁
+Agent Acceptance Gate
+Agent 验收门禁
 ```
 
 ## Agent 自动发现策略
@@ -241,7 +241,7 @@ Agent 交付验收门禁
 推荐先发：
 
 ```text
-Agent Delivery Acceptance Gate
+Agent Acceptance Gate
 Local demo + API draft + public-safe writeup
 ```
 
@@ -257,4 +257,3 @@ Agent marketplace 缺的不是更多 Agent，而是交付验收层。
 2. 把 `call_when` 和 `machine_flags` 调到足够精准。
 3. 决定公开渠道：X / leolabs / GitHub / OKX.AI。
 4. 真正上 OKX.AI 前，必须补 endpoint deploy、payment middleware、receiving wallet、privacy/terms/rate limit。
-

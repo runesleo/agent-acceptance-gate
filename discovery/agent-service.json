@@ -1,8 +1,8 @@
 {
   "schema_version": "0.1",
-  "service_id": "agent-delivery-acceptance-gate",
-  "service_name": "Agent Delivery Acceptance Gate",
-  "display_name_zh": "Agent 交付验收门禁",
+  "service_id": "agent-acceptance-gate",
+  "service_name": "Agent Acceptance Gate",
+  "display_name_zh": "Agent 验收门禁",
   "status": "local_only_not_published",
   "audience": ["agent", "asp", "buyer_agent", "evaluator_agent"],
   "primary_user": "agent",
@@ -72,4 +72,3 @@
     "rate_limit_and_abuse_policy"
   ]
 }
-

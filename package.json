@@ -1,9 +1,9 @@
 {
-  "name": "agent-delivery-acceptance-gate",
+  "name": "agent-acceptance-gate",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local-only prototype for an agent-first delivery acceptance gate service.",
+  "description": "Local-only prototype for an agent-first acceptance gate service.",
   "bin": {
     "audit-agent-deliverable": "./bin/audit-agent-deliverable.mjs"
   },
