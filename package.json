@@ -1,0 +1,18 @@
+{
+  "name": "agent-delivery-acceptance-gate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-only prototype for an agent-first delivery acceptance gate service.",
+  "bin": {
+    "audit-agent-deliverable": "./bin/audit-agent-deliverable.mjs"
+  },
+  "scripts": {
+    "audit": "node ./bin/audit-agent-deliverable.mjs",
+    "audit:samples": "node ./bin/audit-agent-deliverable.mjs --samples --pretty",
+    "serve": "node ./bin/serve-demo.mjs",
+    "test": "node ./test/run-samples.mjs && node ./test/http-smoke.mjs",
+    "test:samples": "node ./test/run-samples.mjs",
+    "test:http": "node ./test/http-smoke.mjs"
+  }
+}
