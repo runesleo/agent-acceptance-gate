@@ -2,7 +2,7 @@
 
 Project: Agent Acceptance Gate
 Chinese name: Agent 验收门禁
-Status: local_repo_private
+Status: local_repo_private_static_demo_public
 Owner thread: product_distribution / cmd5
 Created: 2026-07-02
 
@@ -21,7 +21,7 @@ Human reviews result and authorizes next gate
 
 ## Current state
 
-Local-only runnable prototype:
+Runnable prototype with public static demo:
 
 - deterministic audit engine;
 - CLI;
@@ -30,18 +30,20 @@ Local-only runnable prototype:
 - OpenAPI draft;
 - MCP-style tool manifest;
 - agent discovery metadata;
-- launch/billing drafts.
+- launch/billing drafts;
+- public static demo at https://agent-acceptance-gate.pages.dev/.
 
 ## Not launched
 
 The project is not:
 
-- publicly deployed;
 - submitted to OKX.AI;
 - connected to wallet/payment middleware;
 - connected to API keys or credentials;
 - pushed to GitHub;
 - published on leolabs.
+
+Only `demo/index.html` is publicly deployed as a static Cloudflare Pages demo.
 
 ## Hard gates
 

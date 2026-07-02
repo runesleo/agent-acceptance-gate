@@ -101,10 +101,16 @@ The prototype is rule-based. It validates the product shape before adding any LL
 
 ## Buyer-facing demo
 
+Public static demo:
+
+```text
+https://agent-acceptance-gate.pages.dev/
+```
+
 Open the local demo:
 
 ```text
-/Users/zhangxu/Projects/_inventory/2026-07-02/okx-ai-agent-deliverable-auditor-asp/demo/index.html
+/Users/zhangxu/Projects/agent-acceptance-gate/demo/index.html
 ```
 
 The demo reframes JSON audit output as a buyer acceptance report:
