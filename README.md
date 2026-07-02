@@ -6,9 +6,9 @@ Status: local_only_asp_package
 
 ## Bottom line
 
-`Agent Deliverable Auditor` is a candidate OKX.AI A2MCP service.
+`Agent Acceptance Gate` is a candidate OKX.AI A2MCP service.
 
-It audits AI agent task deliveries before a buyer accepts work, releases escrow, or escalates a dispute.
+It checks whether an AI agent transaction can continue before task acceptance, paid service calls, delivery acceptance, payment release, or dispute review.
 
 The service does not execute wallet actions, agent tasks, repo mutations, or deployments. It reads a task prompt, writeback, artifact list, changed files, validation output, declared hard gates, and next gate. It returns a structured verdict.
 
@@ -17,10 +17,10 @@ The service does not execute wallet actions, agent tasks, repo mutations, or dep
 OKX.AI creates a marketplace where users can hire Agents, ASPs can sell services, and Evaluators can arbitrate disputes. That marketplace needs a boring but valuable layer:
 
 ```text
-Was this Agent deliverable actually complete, verified, and safe to accept?
+Can this agent transaction continue?
 ```
 
-The first sellable wedge is not "AI workflow consulting." It is a repeatable audit call.
+The first sellable wedge is delivery acceptance. The larger product is an agent transaction gate.
 
 ## Package contents
 

@@ -2,7 +2,7 @@
   "schema_version": "0.1",
   "server": {
     "name": "agent-acceptance-gate",
-    "description": "MCP/API service for auditing AI agent deliveries before acceptance, payment release, or dispute review.",
+    "description": "MCP/API service for checking whether AI agent transactions can continue before task acceptance, paid service calls, delivery acceptance, payment release, or dispute review.",
     "status": "local_only_not_published"
   },
   "tools": [
@@ -77,6 +77,18 @@
         "call before payment release or escrow release",
         "call before public deployment if the delivery includes release claims",
         "call when dispute evidence needs structure"
+      ]
+    },
+    {
+      "name": "assess_agent_transaction",
+      "title": "Assess Agent Transaction",
+      "status": "planned",
+      "description": "Future tool: use before an agent accepts a task, spends budget, buys a service, releases payment, or enters dispute. Returns whether the transaction can continue, what evidence is missing, and which hard gates apply.",
+      "routing_hints": [
+        "call before an agent spends budget",
+        "call before a buyer agent hires a seller agent",
+        "call before a seller agent accepts unclear scope",
+        "call before dispute escalation"
       ]
     }
   ]

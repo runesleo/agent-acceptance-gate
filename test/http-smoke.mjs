@@ -37,7 +37,7 @@ try {
   assert(audit.machine_flags.includes('public_release_gate'), 'audit endpoint missing public_release_gate flag');
 
   const html = await fetch(`${base}/`).then((res) => res.text());
-  assert(html.includes('Agent 交付验收器'), 'demo html missing title');
+  assert(html.includes('Agent 验收门禁'), 'demo html missing title');
 
   console.log(`PASS http smoke on ${base}`);
 } finally {

@@ -63,13 +63,14 @@ function readSampleAudits() {
   return fs.readdirSync(sampleDir)
     .filter((file) => file.endsWith('.json'))
     .sort()
-    .map((file) => {
+    .flatMap((file) => {
       const input = JSON.parse(fs.readFileSync(path.join(sampleDir, file), 'utf8'));
-      return {
+      if (!input.task || !input.delivery) return [];
+      return [{
         input_file: file,
         title: titleFromFile(file),
         audit: auditDelivery(input)
-      };
+      }];
     });
 }
 

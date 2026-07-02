@@ -3,9 +3,10 @@ info:
   title: Agent Acceptance Gate
   version: 0.1.0
   description: |
-    Local-only API draft for auditing AI agent deliveries before acceptance,
-    payment release, or dispute review. Not deployed, not connected to OKX,
-    wallet, payment middleware, or public endpoint.
+    Local-only API draft for checking whether an AI agent transaction can
+    continue before task acceptance, paid service calls, delivery acceptance,
+    payment release, or dispute review. Not deployed as a public API, not
+    connected to OKX, wallet, or payment middleware.
 servers:
   - url: http://127.0.0.1:8787
     description: Local development server
