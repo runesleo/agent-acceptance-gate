@@ -93,8 +93,9 @@ export async function assessPolymarketSmartMoneyLive(input = {}, options = {}) {
 /**
  * Shared scan pipeline: large taker trades per market -> per-wallet flow
  * aggregation -> 7d PnL + open-position enrichment for the top wallets.
+ * Exported for reuse by the World Cup Upset Alert service.
  */
-async function scanMarketsForSmartMoney(fetchImpl, markets, limit) {
+export async function scanMarketsForSmartMoney(fetchImpl, markets, limit) {
   const scanned = markets.slice(0, MAX_MARKETS_SCANNED);
 
   const tradesPerMarket = await Promise.all(
@@ -152,6 +153,7 @@ function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan }) {
 /**
  * Find active World Cup markets via Gamma events; fall back to site-wide
  * top-volume markets when nothing matches.
+ * Exported (as resolveWorldCupMarkets) for the World Cup Upset Alert service.
  */
 async function resolveMarkets(fetchImpl, marketHint) {
   let markets = [];
@@ -354,6 +356,7 @@ function buildSignal(entry, sevenDayPnl, position) {
     side: entry.outcome,
     action,
     notional_usdt: notional,
+    last_trade_price: entry.last_price,
     seven_day_pnl_usdt: sevenDayPnl,
     confidence: scoreConfidence(entry, sevenDayPnl),
     rationale: buildRationale(entry, action, sevenDayPnl, position)
@@ -465,3 +468,5 @@ function clampInteger(value, min, max, fallback) {
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
 }
+
+export { resolveMarkets as resolveWorldCupMarkets };

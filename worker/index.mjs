@@ -12,6 +12,14 @@ import {
   assessEventPriceDivergenceLive,
   buildEventPriceDivergenceFallback
 } from '../src/event-price-divergence.mjs';
+import {
+  assessCryptoMarketRegimeLive,
+  buildCryptoMarketRegimeFallback
+} from '../src/crypto-market-regime.mjs';
+import {
+  assessWorldCupUpsetAlertLive,
+  buildWorldCupUpsetAlertFallback
+} from '../src/world-cup-upset-alert.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 
@@ -37,6 +45,14 @@ const PAID_RADAR_ROUTES = {
   '/event-price-divergence-radar': {
     description: 'Event Price Divergence Radar — flags Polymarket event-probability moves that diverge from 24h crypto spot momentum on OKX.',
     load: (payload) => eventPriceDivergenceWithCache(payload)
+  },
+  '/crypto-market-regime-radar': {
+    description: 'Crypto Market Regime Radar — blends OKX spot momentum, perp funding/premium and Polymarket event-probability drift into an explainable risk_on / risk_off / neutral / mixed regime call with a 0-100 score.',
+    load: (payload) => cryptoMarketRegimeWithCache(payload)
+  },
+  '/world-cup-upset-alert': {
+    description: 'World Cup Upset Alert — flags profitable Polymarket wallets (7d PnL > 0) entering or adding to low-probability (<0.35) World Cup outcomes: potential upset positioning.',
+    load: (payload) => worldCupUpsetAlertWithCache(payload)
   },
   '/agent-delivery-acceptance-audit': {
     description: 'Agent Delivery Audit Gate — audits an agent task delivery (evidence, validation, hard gates) and returns pass / needs_review / fail with a buyer summary.',
@@ -87,6 +103,24 @@ export default {
               category: 'finance',
               fee_usdt: '1',
               description: 'Flags Polymarket event-probability moves that diverge from 24h crypto spot momentum on OKX.',
+              mode: 'live'
+            },
+            {
+              service_id: 'crypto_market_regime_radar',
+              path: '/crypto-market-regime-radar',
+              title: 'Crypto Market Regime Radar',
+              category: 'finance',
+              fee_usdt: '1',
+              description: 'Blends OKX spot momentum, perp funding/premium and Polymarket event-probability drift into an explainable risk_on / risk_off / neutral / mixed regime call with a 0-100 score.',
+              mode: 'live'
+            },
+            {
+              service_id: 'world_cup_upset_alert',
+              path: '/world-cup-upset-alert',
+              title: 'World Cup Upset Alert',
+              category: 'world_cup',
+              fee_usdt: '1',
+              description: 'Flags profitable Polymarket wallets (7d PnL > 0) entering or adding to low-probability (<0.35) World Cup outcomes — potential upset positioning.',
               mode: 'live'
             },
             {
@@ -184,6 +218,28 @@ async function eventPriceDivergenceWithCache(payload) {
     cacheKey: `divergence|${asset}|${limit}`,
     loadLive: () => assessEventPriceDivergenceLive(payload),
     loadFallback: () => buildEventPriceDivergenceFallback(payload)
+  });
+}
+
+async function cryptoMarketRegimeWithCache(payload) {
+  const focus = String(payload?.focus ?? payload?.asset ?? 'all').trim().toLowerCase();
+  const limit = Number.parseInt(payload?.limit, 10) || 5;
+
+  return radarWithCache({
+    cacheKey: `regime|${focus}|${limit}`,
+    loadLive: () => assessCryptoMarketRegimeLive(payload),
+    loadFallback: () => buildCryptoMarketRegimeFallback(payload)
+  });
+}
+
+async function worldCupUpsetAlertWithCache(payload) {
+  const market = String(payload?.market ?? payload?.market_id ?? payload?.query ?? 'all').trim().toLowerCase();
+  const limit = Number.parseInt(payload?.limit, 10) || 5;
+
+  return radarWithCache({
+    cacheKey: `upset|${market}|${limit}`,
+    loadLive: () => assessWorldCupUpsetAlertLive(payload),
+    loadFallback: () => buildWorldCupUpsetAlertFallback(payload)
   });
 }
 
