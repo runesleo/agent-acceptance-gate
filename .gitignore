@@ -7,3 +7,6 @@ coverage/
 dist/
 *.log
 
+.secrets.env
+.dev.vars
+.wrangler/

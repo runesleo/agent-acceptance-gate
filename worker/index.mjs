@@ -8,7 +8,10 @@ import {
   getOkxAiDataServiceByPath,
   listOkxAiDataServices
 } from '../src/okx-ai-data-services.mjs';
+import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 
+// Base headers are byte-identical to the pre-paywall deployment; x402-specific
+// CORS additions are only applied when X402_ENABLED === 'true'.
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-origin': '*',
@@ -16,11 +19,26 @@ const JSON_HEADERS = {
   'access-control-allow-headers': 'content-type'
 };
 
+// Paid radar endpoints (1 USDT per call via OKX x402 when X402_ENABLED === 'true').
+const PAID_RADAR_ROUTES = {
+  '/world-cup-smart-money-radar': {
+    description: 'World Cup Smart Money Radar — tracks profitable World Cup prediction-market wallets and highlights position changes.',
+    load: (payload) => worldCupRadarWithCache(payload)
+  },
+  '/polymarket-smart-money-radar': {
+    description: 'Polymarket Smart Money Radar — tracks profitable Polymarket wallets and highlights position changes.',
+    load: (payload) => polymarketRadarWithCache(payload)
+  }
+};
+
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     try {
       if (request.method === 'OPTIONS') {
-        return new Response(null, { status: 204, headers: JSON_HEADERS });
+        return new Response(null, {
+          status: 204,
+          headers: isX402Enabled(env) ? { ...JSON_HEADERS, ...X402_CORS_HEADERS } : JSON_HEADERS
+        });
       }
 
       const url = new URL(request.url);
@@ -58,14 +76,21 @@ export default {
         });
       }
 
-      if (request.method === 'POST' && url.pathname === '/world-cup-smart-money-radar') {
-        const payload = await readJson(request);
-        return json(await worldCupRadarWithCache(payload));
-      }
-
-      if (request.method === 'POST' && url.pathname === '/polymarket-smart-money-radar') {
-        const payload = await readJson(request);
-        return json(await polymarketRadarWithCache(payload));
+      if (request.method === 'POST' && PAID_RADAR_ROUTES[url.pathname]) {
+        const route = PAID_RADAR_ROUTES[url.pathname];
+        if (!isX402Enabled(env)) {
+          // Compatibility mode (default): behave exactly like the free listing
+          // endpoints that are currently under marketplace review.
+          return json(await route.load(await readJson(request)));
+        }
+        return handlePaidRequest(request, env, {
+          resourceUrl: `${url.origin}${url.pathname}`,
+          description: route.description,
+          // Body is only parsed after payment verifies (challenge costs nothing).
+          deliver: async () => route.load(await readJson(request)),
+          respond: (payload, status = 200, extraHeaders = undefined) =>
+            json(payload, status, { ...X402_CORS_HEADERS, ...(extraHeaders || {}) })
+        });
       }
 
       if (request.method === 'POST') {
@@ -163,9 +188,9 @@ async function readJson(request) {
   return JSON.parse(text);
 }
 
-function json(payload, status = 200) {
+function json(payload, status = 200, extraHeaders = undefined) {
   return new Response(`${JSON.stringify(payload, null, 2)}\n`, {
     status,
-    headers: JSON_HEADERS
+    headers: extraHeaders ? { ...JSON_HEADERS, ...extraHeaders } : JSON_HEADERS
   });
 }
