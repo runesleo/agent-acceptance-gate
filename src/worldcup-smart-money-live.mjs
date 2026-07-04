@@ -1,9 +1,16 @@
-// Live Polymarket-backed implementation of the World Cup Smart Money Radar.
+// Live Polymarket-backed implementations of the Smart Money Radar services:
+// - World Cup Smart Money Radar (world_cup_smart_money_radar) — World Cup markets only.
+// - Polymarket Smart Money Radar (polymarket_smart_money_radar) — site-wide, any topic.
+// Both share the same scan pipeline (large taker trades -> wallet aggregation ->
+// 7d PnL + position enrichment); only market discovery differs.
 //
 // Public endpoints used (no API key required), response shapes verified 2026-07-05:
 // - Gamma:   https://gamma-api.polymarket.com/events?tag_slug=world-cup&closed=false...
 //            -> [{ title, slug, volume24hr, markets: [{ conditionId, question, slug,
 //               outcomes: '["Yes","No"]', outcomePrices: '["0.465","0.535"]', active, closed, ... }] }]
+// - Gamma:   https://gamma-api.polymarket.com/public-search?q=<term>&events_status=active&limit_per_type=10
+//            -> { events: [{ title, slug, closed, markets: [...same market shape...] }], pagination }
+//            (text search; /events?title=... is NOT supported — param is ignored, verified 2026-07-05)
 // - Gamma:   https://gamma-api.polymarket.com/markets?closed=false&order=volume24hr...
 //            -> [{ conditionId, question, slug, outcomes, outcomePrices, volumeNum, ... }] (fallback)
 // - Data:    https://data-api.polymarket.com/trades?market=<conditionId>&takerOnly=true&filterType=CASH&filterAmount=...
@@ -14,6 +21,7 @@
 //            -> [{ proxyWallet, amount, name, pseudonym }] (empty array when wallet unranked)
 
 const SERVICE_ID = 'world_cup_smart_money_radar';
+const POLYMARKET_SERVICE_ID = 'polymarket_smart_money_radar';
 const GAMMA_BASE = 'https://gamma-api.polymarket.com';
 const DATA_BASE = 'https://data-api.polymarket.com';
 const LB_BASE = 'https://lb-api.polymarket.com';
@@ -39,6 +47,54 @@ export async function assessWorldCupSmartMoneyLive(input = {}, options = {}) {
   const limit = clampInteger(input.limit, 1, 10, 5);
 
   const { markets, usedFallback } = await resolveMarkets(fetchImpl, marketHint);
+
+  return buildLiveResponse({
+    serviceId: SERVICE_ID,
+    inputEcho: {
+      market: input.market ?? input.market_id ?? input.query ?? 'all',
+      limit
+    },
+    fallbackCaveat: usedFallback
+      ? 'No active World Cup markets matched; fell back to Polymarket top-volume markets site-wide.'
+      : null,
+    scan: await scanMarketsForSmartMoney(fetchImpl, markets, limit)
+  });
+}
+
+/**
+ * Site-wide Polymarket Smart Money Radar. Same scan pipeline as the World Cup
+ * radar, but market discovery searches the whole site: `market` / `topic` are
+ * treated as free-text search terms (Gamma /public-search, with a top-volume
+ * substring-match fallback); with no term it scans the top 24h-volume markets.
+ * Throws on upstream failure so callers can decide how to degrade.
+ */
+export async function assessPolymarketSmartMoneyLive(input = {}, options = {}) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const searchTerm = normalizeText(input.market ?? input.topic ?? input.query ?? 'all');
+  const limit = clampInteger(input.limit, 1, 10, 5);
+
+  const { markets, usedFallback } = await resolvePolymarketMarkets(fetchImpl, searchTerm);
+
+  return buildLiveResponse({
+    serviceId: POLYMARKET_SERVICE_ID,
+    inputEcho: {
+      market: input.market ?? null,
+      topic: input.topic ?? null,
+      query: searchTerm || 'all',
+      limit
+    },
+    fallbackCaveat: usedFallback
+      ? `No active Polymarket markets matched "${searchTerm}"; fell back to top-volume markets site-wide.`
+      : null,
+    scan: await scanMarketsForSmartMoney(fetchImpl, markets, limit)
+  });
+}
+
+/**
+ * Shared scan pipeline: large taker trades per market -> per-wallet flow
+ * aggregation -> 7d PnL + open-position enrichment for the top wallets.
+ */
+async function scanMarketsForSmartMoney(fetchImpl, markets, limit) {
   const scanned = markets.slice(0, MAX_MARKETS_SCANNED);
 
   const tradesPerMarket = await Promise.all(
@@ -56,11 +112,16 @@ export async function assessWorldCupSmartMoneyLive(input = {}, options = {}) {
     return buildSignal(entry, pnl, position);
   }));
 
+  return { scanned, enriched };
+}
+
+function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan }) {
+  const { scanned, enriched } = scan;
   const missingPnl = enriched.some((signal) => signal.seven_day_pnl_usdt === null);
 
   const caveats = [...STANDARD_CAVEATS];
-  if (usedFallback) {
-    caveats.push('No active World Cup markets matched; fell back to Polymarket top-volume markets site-wide.');
+  if (fallbackCaveat) {
+    caveats.push(fallbackCaveat);
   }
   if (missingPnl) {
     caveats.push('seven_day_pnl_usdt is null for wallets not present on the Polymarket 7-day profit leaderboard; values are never estimated.');
@@ -68,13 +129,10 @@ export async function assessWorldCupSmartMoneyLive(input = {}, options = {}) {
 
   return {
     schema_version: '0.1',
-    service_id: SERVICE_ID,
+    service_id: serviceId,
     mode: 'live',
     generated_at: new Date().toISOString(),
-    input: {
-      market: input.market ?? input.market_id ?? input.query ?? 'all',
-      limit
-    },
+    input: inputEcho,
     summary: buildSummary(enriched),
     signals: enriched,
     caveats,
@@ -127,6 +185,64 @@ async function resolveMarkets(fetchImpl, marketHint) {
     .filter((market) => market.conditionId && market.enableOrderBook !== false)
     .map((market) => normalizeMarket(market, market.question ?? market.slug ?? ''));
   return { markets: fallbackMarkets, usedFallback: true };
+}
+
+/**
+ * Site-wide market discovery for the Polymarket radar.
+ * With a search term: Gamma /public-search first (real text search), then a
+ * substring match over top-volume events. Without one (or when nothing
+ * matches): site-wide top 24h-volume markets.
+ */
+async function resolvePolymarketMarkets(fetchImpl, searchTerm) {
+  const hasTerm = Boolean(searchTerm) && searchTerm !== 'all';
+
+  if (hasTerm) {
+    try {
+      const result = await fetchJson(
+        fetchImpl,
+        `${GAMMA_BASE}/public-search?q=${encodeURIComponent(searchTerm)}&events_status=active&limit_per_type=10`
+      );
+      const markets = flattenEventMarkets(Array.isArray(result?.events) ? result.events : []);
+      if (markets.length) {
+        return { markets, usedFallback: false };
+      }
+    } catch {
+      // fall through to top-volume events + substring match
+    }
+  }
+
+  let markets = [];
+  try {
+    const events = await fetchJson(
+      fetchImpl,
+      `${GAMMA_BASE}/events?closed=false&active=true&limit=25&order=volume24hr&ascending=false`
+    );
+    markets = flattenEventMarkets(Array.isArray(events) ? events : []);
+  } catch {
+    markets = [];
+  }
+
+  if (hasTerm && markets.length) {
+    const filtered = markets.filter((market) =>
+      normalizeText(`${market.market_id} ${market.title} ${market.event_title} ${market.slug}`).includes(searchTerm));
+    if (filtered.length) {
+      return { markets: filtered, usedFallback: false };
+    }
+    return { markets, usedFallback: true };
+  }
+
+  if (markets.length) {
+    return { markets, usedFallback: false };
+  }
+
+  const fallback = await fetchJson(
+    fetchImpl,
+    `${GAMMA_BASE}/markets?closed=false&active=true&limit=25&order=volume24hr&ascending=false`
+  );
+  const fallbackMarkets = (Array.isArray(fallback) ? fallback : [])
+    .filter((market) => market.conditionId && market.enableOrderBook !== false)
+    .map((market) => normalizeMarket(market, market.question ?? market.slug ?? ''));
+  return { markets: fallbackMarkets, usedFallback: hasTerm };
 }
 
 function flattenEventMarkets(events) {
