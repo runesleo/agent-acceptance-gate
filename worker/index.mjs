@@ -8,6 +8,11 @@ import {
   getOkxAiDataServiceByPath,
   listOkxAiDataServices
 } from '../src/okx-ai-data-services.mjs';
+import {
+  assessEventPriceDivergenceLive,
+  buildEventPriceDivergenceFallback
+} from '../src/event-price-divergence.mjs';
+import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 
 // Base headers are byte-identical to the pre-paywall deployment; x402-specific
@@ -28,6 +33,15 @@ const PAID_RADAR_ROUTES = {
   '/polymarket-smart-money-radar': {
     description: 'Polymarket Smart Money Radar — tracks profitable Polymarket wallets and highlights position changes.',
     load: (payload) => polymarketRadarWithCache(payload)
+  },
+  '/event-price-divergence-radar': {
+    description: 'Event Price Divergence Radar — flags Polymarket event-probability moves that diverge from 24h crypto spot momentum on OKX.',
+    load: (payload) => eventPriceDivergenceWithCache(payload)
+  },
+  '/agent-delivery-acceptance-audit': {
+    description: 'Agent Delivery Audit Gate — audits an agent task delivery (evidence, validation, hard gates) and returns pass / needs_review / fail with a buyer summary.',
+    // Deterministic per-payload audit — no cache (every audit input is unique).
+    load: (payload) => runDeliveryAcceptanceAudit(payload)
   }
 };
 
@@ -57,6 +71,24 @@ export default {
           schema_version: '0.1',
           mode: 'edge_worker_public_safe_demo',
           services: [
+            {
+              service_id: 'agent_delivery_acceptance_audit',
+              path: '/agent-delivery-acceptance-audit',
+              title: 'Agent Delivery Audit Gate',
+              category: 'agent_ops',
+              fee_usdt: '1',
+              description: 'Audits an agent task delivery (evidence, validation, hard gates) and returns pass / needs_review / fail with a buyer summary.',
+              mode: 'live'
+            },
+            {
+              service_id: 'event_price_divergence_radar',
+              path: '/event-price-divergence-radar',
+              title: 'Event Price Divergence Radar',
+              category: 'finance',
+              fee_usdt: '1',
+              description: 'Flags Polymarket event-probability moves that diverge from 24h crypto spot momentum on OKX.',
+              mode: 'live'
+            },
             {
               service_id: 'world_cup_smart_money_radar',
               path: '/world-cup-smart-money-radar',
@@ -142,6 +174,75 @@ async function polymarketRadarWithCache(payload) {
       return assessOkxAiDataService(service, payload);
     }
   });
+}
+
+async function eventPriceDivergenceWithCache(payload) {
+  const asset = String(payload?.asset ?? 'all').trim().toLowerCase();
+  const limit = Number.parseInt(payload?.limit, 10) || 5;
+
+  return radarWithCache({
+    cacheKey: `divergence|${asset}|${limit}`,
+    loadLive: () => assessEventPriceDivergenceLive(payload),
+    loadFallback: () => buildEventPriceDivergenceFallback(payload)
+  });
+}
+
+// ---- Agent Delivery Audit Gate ---------------------------------------------
+// Accepts either the full auditor schema ({task, delivery, context}) or the
+// compact buyer shape {task, delivery_summary, artifacts, validation,
+// hard_gates?, next_gate?} and adapts it before calling auditDelivery.
+// Invalid input throws BEFORE x402 settle, so a bad request never burns a payment.
+function runDeliveryAcceptanceAudit(payload) {
+  const input = normalizeAuditInput(payload);
+  return auditDelivery(input);
+}
+
+function normalizeAuditInput(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Audit input must be a JSON object with at least {task, delivery_summary}.');
+  }
+
+  // Full auditor schema passes through untouched (context defaulted).
+  if (payload.delivery && typeof payload.delivery === 'object') {
+    return { ...payload, context: payload.context ?? { repo_state: 'unknown' } };
+  }
+
+  const task = typeof payload.task === 'string'
+    ? { buyer_goal: payload.task }
+    : (payload.task && typeof payload.task === 'object' ? { ...payload.task } : null);
+  if (task && !task.buyer_goal) {
+    task.buyer_goal = task.goal ?? task.description ?? null;
+  }
+  if (!task?.buyer_goal || !payload.delivery_summary) {
+    throw new Error('Audit input requires task (string or {buyer_goal, ...}) and delivery_summary. Optional: artifacts[], validation[], changed_files[], hard_gates[], next_gate, context.');
+  }
+
+  return {
+    schema_version: '0.1',
+    mode: payload.mode ?? 'full',
+    task,
+    delivery: {
+      writeback_text: String(payload.delivery_summary),
+      artifact_paths: toStringArray(payload.artifacts),
+      changed_files: toStringArray(payload.changed_files),
+      validation: toStringArray(payload.validation),
+      validation_output: payload.validation_output ?? null,
+      rollback_plan: payload.rollback_plan ?? null,
+      hard_gates_declared: toStringArray(payload.hard_gates),
+      next_gate: payload.next_gate
+        ? String(payload.next_gate)
+        : 'Buyer manual review before acceptance (seller declared no next gate).'
+    },
+    context: payload.context && typeof payload.context === 'object'
+      ? payload.context
+      : { repo_state: payload.repo_state ?? 'unknown' }
+  };
+}
+
+function toStringArray(value) {
+  if (value === null || value === undefined) return [];
+  const items = Array.isArray(value) ? value : [value];
+  return items.map((item) => String(item)).filter((item) => item.trim().length > 0);
 }
 
 async function radarWithCache({ cacheKey, loadLive, loadFallback }) {
