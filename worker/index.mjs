@@ -1,4 +1,5 @@
 import { assessWorldCupSmartMoney } from '../src/worldcup-smart-money.mjs';
+import { assessWorldCupSmartMoneyLive } from '../src/worldcup-smart-money-live.mjs';
 import {
   assessOkxAiDataService,
   getOkxAiDataServiceByPath,
@@ -42,7 +43,7 @@ export default {
               category: 'world_cup',
               fee_usdt: '1',
               description: 'Tracks profitable World Cup prediction-market wallets and highlights position changes.',
-              mode: 'public_safe_demo'
+              mode: 'live'
             },
             ...listOkxAiDataServices()
           ]
@@ -51,7 +52,7 @@ export default {
 
       if (request.method === 'POST' && url.pathname === '/world-cup-smart-money-radar') {
         const payload = await readJson(request);
-        return json(assessWorldCupSmartMoney(payload));
+        return json(await worldCupRadarWithCache(payload));
       }
 
       if (request.method === 'POST') {
@@ -74,6 +75,50 @@ export default {
     }
   }
 };
+
+// In-memory per-isolate cache for World Cup radar responses. Shields the paid
+// A2MCP endpoint from Polymarket rate limits; entries expire after CACHE_TTL_MS.
+const CACHE_TTL_MS = 120_000;
+const radarCache = new Map();
+
+async function worldCupRadarWithCache(payload) {
+  const market = String(payload?.market ?? payload?.market_id ?? payload?.query ?? 'all').trim().toLowerCase();
+  const limit = Number.parseInt(payload?.limit, 10) || 5;
+  const cacheKey = `${market}|${limit}`;
+
+  const cached = radarCache.get(cacheKey);
+  if (cached && Date.now() - cached.storedAt < CACHE_TTL_MS) {
+    return { ...cached.payload, cache: 'hit' };
+  }
+
+  try {
+    const live = await assessWorldCupSmartMoneyLive(payload);
+    radarCache.set(cacheKey, { storedAt: Date.now(), payload: live });
+    pruneCache();
+    return live;
+  } catch (error) {
+    // Never 5xx a paid call: serve stale cache first, then degraded demo data.
+    if (cached) {
+      return { ...cached.payload, cache: 'stale', mode: 'degraded_stale_cache' };
+    }
+    const fallback = assessWorldCupSmartMoney(payload);
+    fallback.mode = 'degraded';
+    fallback.caveats = [
+      `Live Polymarket fetch failed (${error instanceof Error ? error.message : String(error)}); serving static fallback data.`,
+      'Do not trade on this response. Retry shortly for live data.',
+      ...fallback.caveats
+    ];
+    return fallback;
+  }
+}
+
+function pruneCache() {
+  if (radarCache.size <= 32) return;
+  const oldestFirst = [...radarCache.entries()].sort((a, b) => a[1].storedAt - b[1].storedAt);
+  for (const [key] of oldestFirst.slice(0, radarCache.size - 32)) {
+    radarCache.delete(key);
+  }
+}
 
 async function readJson(request) {
   const text = await request.text();
