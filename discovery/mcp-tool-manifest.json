@@ -7,6 +7,80 @@
   },
   "tools": [
     {
+      "name": "world_cup_smart_money_radar",
+      "title": "World Cup Smart Money Radar",
+      "description": "Use this when an agent needs World Cup prediction-market smart-money movement signals. It returns wallet labels, position changes, market side, notional size, confidence, rationale, and caveats. Data and analytics only; no custody, no trading, no investment advice.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "market": {
+            "type": "string",
+            "description": "Optional market hint, market id, or all."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "required": ["schema_version", "service_id", "mode", "summary", "signals", "caveats", "next_gate"],
+        "properties": {
+          "schema_version": { "type": "string" },
+          "service_id": { "type": "string", "const": "world_cup_smart_money_radar" },
+          "mode": { "type": "string" },
+          "summary": { "type": "string" },
+          "signals": { "type": "array", "items": { "type": "object" } },
+          "caveats": { "type": "array", "items": { "type": "string" } },
+          "next_gate": { "type": "string" }
+        }
+      },
+      "routing_hints": [
+        "call for World Cup prediction-market smart-money movement",
+        "call when an agent needs a compact Polymarket-derived signal report",
+        "do not call for trade execution, custody, or investment advice"
+      ]
+    },
+    {
+      "name": "polymarket_smart_money_radar",
+      "title": "Polymarket Smart Money Radar",
+      "description": "Use this when an agent needs all-market Polymarket smart-money movement signals. Data and analytics only; no custody, no trading, no investment advice.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 10 }
+        }
+      }
+    },
+    {
+      "name": "event_probability_crypto_divergence",
+      "title": "Event Probability Crypto Divergence",
+      "description": "Use this when an agent needs event probability versus crypto spot/funding divergence signals. Data and analytics only.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string" },
+          "asset": { "type": "string" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 10 }
+        }
+      }
+    },
+    {
+      "name": "crypto_market_pulse_report",
+      "title": "Crypto Market Pulse Report",
+      "description": "Use this when an agent needs a compact crypto market pulse report with flows, anomalies, and watch items.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 10 }
+        }
+      }
+    },
+    {
       "name": "audit_agent_delivery",
       "title": "Audit Agent Delivery",
       "description": "Use this before accepting an AI agent delivery, releasing escrow/payment, submitting a seller delivery, or voting on a dispute. It checks artifacts, changed files, validation, rollback, hard gates, and next gate, then returns pass/needs_review/fail with buyer-ready reasoning.",
