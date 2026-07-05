@@ -21,7 +21,7 @@
 - serviceDescription（两行 \n 分隔）:
   - L1: `Tracks profitable Polymarket wallets across all markets and reports position changes, sides, notional size, and a confidence score for each signal.`
   - L2: `Provide market or topic as a keyword such as bitcoin or a market name, or all, plus limit from 1 to 10; returns compact data-only smart money signals.`
-- serviceType: `A2MCP` · fee: `1` · endpoint: `https://agent-acceptance-gate-api.oleolezx.workers.dev/polymarket-smart-money-radar`（✅ 已部署 live）
+- serviceType: `A2MCP` · fee: `1` · endpoint: `https://api.leolabs.me/polymarket-smart-money-radar`（✅ 已部署 live）
 
 ## C. S1 listing 草稿（Agent Delivery Acceptance Audit，软件实用工具赛道占位）
 
