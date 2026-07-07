@@ -32,8 +32,15 @@ curl -sS -X POST https://api.leolabs.me/token-dd-verdict \
 # 3 PM Trade Preflight
 curl -sS -X POST https://api.leolabs.me/pm-trade-preflight \
   -H 'content-type: application/json' \
-  -d '{"slug":"will-donald-trump-win-the-2024-us-presidential-election","side":"yes","size_usd":100}'
+  -d '{"slug":"will-egypt-win-the-2026-fifa-world-cup","side":"yes","size_usd":100}'
+
+# 4 Event Readout
+curl -sS -X POST https://api.leolabs.me/pm-event-readout \
+  -H 'content-type: application/json' \
+  -d '{"slug":"will-egypt-win-the-2026-fifa-world-cup"}'
 ```
+
+自调用批跑：`bash scripts/okx-asp-self-call.sh`
 
 ## 素材清单
 

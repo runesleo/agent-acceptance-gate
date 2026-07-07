@@ -74,6 +74,14 @@ export const SERVICE_CATALOG = {
     fee_usdt: '0.1',
     fee_atomic: '100000',
     mode: 'live_unlisted'
+  },
+  '/pm-event-readout': {
+    service_id: 'pm_event_readout',
+    title: 'PM Event Readout',
+    category: 'finance',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live_unlisted'
   }
 };
 
@@ -138,6 +146,12 @@ export const PENDING_OKX_LISTING_COPY = {
     serviceDescription:
       'Read-only trade/watch/skip gate before a Polymarket order; checks liquidity, price zone, and spread.\n'
       + '预测市场下单前检查：trade/观望/跳过，只读不下单。输入 market_url 或 slug + side(yes/no)，可选 size_usd。'
+  },
+  pm_event_readout: {
+    serviceName: 'PM Event Readout',
+    serviceDescription:
+      'Event evidence card from public Gamma metadata: implied view, priced-in notes, uncertainties, tradability.\n'
+      + '预测市场事件解读卡：定价已反映什么、不确定性、可交易性。输入 market_url 或 slug；不下单建议。'
   }
 };
 

@@ -28,6 +28,10 @@ import {
   assessPmTradePreflightLive,
   buildPmTradePreflightFallback
 } from '../src/pm-trade-preflight.mjs';
+import {
+  assessPmEventReadoutLive,
+  buildPmEventReadoutFallback
+} from '../src/pm-event-readout.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
@@ -76,6 +80,10 @@ const PAID_RADAR_ROUTES = {
   '/pm-trade-preflight': {
     description: 'PM Trade Preflight — read-only trade/watch/skip gate before a Polymarket order using public Gamma market metadata (liquidity, price zone, spread).',
     load: (payload) => pmTradePreflightWithCache(payload)
+  },
+  '/pm-event-readout': {
+    description: 'PM Event Readout — event evidence card from public Gamma metadata: implied view, priced-in notes, uncertainties, and tradability before trade decisions.',
+    load: (payload) => pmEventReadoutWithCache(payload)
   }
 };
 
@@ -303,6 +311,24 @@ async function pmTradePreflightWithCache(payload) {
   });
 }
 
+async function pmEventReadoutWithCache(payload) {
+  const ref = String(
+    payload?.condition_id
+    ?? payload?.slug
+    ?? payload?.market_url
+    ?? ''
+  ).trim().toLowerCase();
+  if (!ref) {
+    throw new Error('pm-event-readout requires market_url, condition_id, or slug.');
+  }
+
+  return radarWithCache({
+    cacheKey: `readout|${ref}`,
+    loadLive: () => assessPmEventReadoutLive(payload),
+    loadFallback: () => buildPmEventReadoutFallback(payload)
+  });
+}
+
 // ---- Agent Delivery Audit Gate ---------------------------------------------
 // Accepts either the full auditor schema ({task, delivery, context}) or the
 // compact buyer shape {task, delivery_summary, artifacts, validation,
@@ -417,7 +443,9 @@ function samplePayloadForPath(pathname) {
     case '/token-dd-verdict':
       return { asset: '0x000000000000000000000000000000000000dead' };
     case '/pm-trade-preflight':
-      return { slug: 'will-donald-trump-win-the-2024-us-presidential-election', side: 'yes' };
+      return { slug: 'will-egypt-win-the-2026-fifa-world-cup', side: 'yes' };
+    case '/pm-event-readout':
+      return { slug: 'will-egypt-win-the-2026-fifa-world-cup' };
     default:
       return { limit: 2 };
   }

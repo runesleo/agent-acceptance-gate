@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import worker from '../worker/index.mjs';
 import { assessTokenDdVerdictLive } from '../src/token-dd-verdict.mjs';
 import { assessPmTradePreflightLive } from '../src/pm-trade-preflight.mjs';
+import { assessPmEventReadoutLive } from '../src/pm-event-readout.mjs';
 
 const BASE = 'https://gate.example.com';
 
@@ -93,6 +94,33 @@ const BASE = 'https://gate.example.com';
   assert.equal(preflight.action, 'skip');
 }
 
+// ---- unit: pm-event-readout -----------------------------------------------
+
+{
+  const mockGamma = async () => new Response(JSON.stringify([{
+    conditionId: '0xreadout',
+    slug: 'demo-readout',
+    question: 'Will demo happen by July?',
+    active: true,
+    closed: false,
+    volume24hr: 80000,
+    oneDayPriceChange: 0.01,
+    outcomes: '["Yes","No"]',
+    outcomePrices: '["0.12","0.88"]',
+    bestBid: 0.11,
+    bestAsk: 0.13,
+    endDate: '2026-12-31'
+  }]), { status: 200, headers: { 'content-type': 'application/json' } });
+
+  const readout = await assessPmEventReadoutLive(
+    { slug: 'demo-readout' },
+    { fetchImpl: mockGamma }
+  );
+  assert.equal(readout.service_id, 'pm_event_readout');
+  assert.ok(['weak', 'low', 'medium', 'high'].includes(readout.tradability));
+  assert.equal(readout.next_decision_card_needed, 'yes');
+}
+
 // ---- worker integration (degraded fallback, no external network) ------------
 
 const savedFetch = globalThis.fetch;
@@ -126,7 +154,16 @@ try {
 
   const catalog = await worker.fetch(new Request(`${BASE}/api/okx-ai-services`)).then((r) => r.json());
   assert.ok(catalog.services.some((s) => s.service_id === 'token_dd_verdict'));
-  assert.ok(catalog.services.some((s) => s.service_id === 'pm_trade_preflight'));
+  assert.ok(catalog.services.some((s) => s.service_id === 'pm_event_readout'));
+
+  const readRes = await worker.fetch(new Request(`${BASE}/pm-event-readout`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ slug: 'will-egypt-win-the-2026-fifa-world-cup' })
+  }));
+  assert.equal(readRes.status, 200);
+  const readBody = await readRes.json();
+  assert.equal(readBody.service_id, 'pm_event_readout');
 
   const sample = await worker.fetch(new Request(`${BASE}/token-dd-verdict`, { method: 'GET' })).then((r) => r.json());
   assert.equal(sample.mode, 'public_sample');
