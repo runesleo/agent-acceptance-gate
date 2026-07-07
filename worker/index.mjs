@@ -22,6 +22,8 @@ import {
 } from '../src/world-cup-upset-alert.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
+import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
+import { hasUsedFreeTrial, markFreeTrialUsed, withTrialBilling } from './trial.mjs';
 
 // Base headers are byte-identical to the pre-paywall deployment; x402-specific
 // CORS additions are only applied when X402_ENABLED === 'true'.
@@ -32,7 +34,7 @@ const JSON_HEADERS = {
   'access-control-allow-headers': 'content-type'
 };
 
-// Paid radar endpoints (1 USDT per call via OKX x402 when X402_ENABLED === 'true').
+// Paid A2MCP endpoints (per-service x402 fee + one free trial per client IP when enabled).
 const PAID_RADAR_ROUTES = {
   '/world-cup-smart-money-radar': {
     description: 'World Cup Smart Money Radar — tracks profitable World Cup prediction-market wallets and highlights position changes.',
@@ -83,76 +85,86 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/okx-ai-services') {
+        const listed = [...LISTED_SERVICE_PATHS].map((path) => {
+          const meta = SERVICE_CATALOG[path];
+          const route = PAID_RADAR_ROUTES[path];
+          return {
+            service_id: meta.service_id,
+            path,
+            title: meta.title,
+            category: meta.category,
+            fee_usdt: meta.fee_usdt,
+            free_trial: 'one_per_client_ip_per_service',
+            description: route?.description ?? meta.title,
+            mode: meta.mode
+          };
+        });
+        const unlisted = Object.entries(SERVICE_CATALOG)
+          .filter(([path]) => !LISTED_SERVICE_PATHS.has(path))
+          .map(([path, meta]) => ({
+            service_id: meta.service_id,
+            path,
+            title: meta.title,
+            category: meta.category,
+            fee_usdt: meta.fee_usdt,
+            mode: meta.mode
+          }));
         return json({
           schema_version: '0.1',
-          mode: 'edge_worker_public_safe_demo',
-          services: [
-            {
-              service_id: 'agent_delivery_acceptance_audit',
-              path: '/agent-delivery-acceptance-audit',
-              title: 'Agent Delivery Audit Gate',
-              category: 'agent_ops',
-              fee_usdt: '1',
-              description: 'Audits an agent task delivery (evidence, validation, hard gates) and returns pass / needs_review / fail with a buyer summary.',
-              mode: 'live'
-            },
-            {
-              service_id: 'event_price_divergence_radar',
-              path: '/event-price-divergence-radar',
-              title: 'Event Price Divergence Radar',
-              category: 'finance',
-              fee_usdt: '1',
-              description: 'Flags Polymarket event-probability moves that diverge from 24h crypto spot momentum on OKX.',
-              mode: 'live'
-            },
-            {
-              service_id: 'crypto_market_regime_radar',
-              path: '/crypto-market-regime-radar',
-              title: 'Crypto Market Regime Radar',
-              category: 'finance',
-              fee_usdt: '1',
-              description: 'Blends OKX spot momentum, perp funding/premium and Polymarket event-probability drift into an explainable risk_on / risk_off / neutral / mixed regime call with a 0-100 score.',
-              mode: 'live'
-            },
-            {
-              service_id: 'world_cup_upset_alert',
-              path: '/world-cup-upset-alert',
-              title: 'World Cup Upset Alert',
-              category: 'world_cup',
-              fee_usdt: '1',
-              description: 'Flags profitable Polymarket wallets (7d PnL > 0) entering or adding to low-probability (<0.35) World Cup outcomes — potential upset positioning.',
-              mode: 'live'
-            },
-            {
-              service_id: 'world_cup_smart_money_radar',
-              path: '/world-cup-smart-money-radar',
-              title: 'World Cup Smart Money Radar',
-              category: 'world_cup',
-              fee_usdt: '1',
-              description: 'Tracks profitable World Cup prediction-market wallets and highlights position changes.',
-              mode: 'live'
-            },
-            // polymarket_smart_money_radar is served live by this worker; the
-            // remaining data services are still public-safe demos.
-            ...listOkxAiDataServices().map((service) =>
-              service.service_id === 'polymarket_smart_money_radar'
-                ? { ...service, mode: 'live' }
-                : service)
-          ]
+          mode: 'edge_worker_live',
+          billing: {
+            x402_enabled: isX402Enabled(env),
+            free_trial: 'One POST per client IP per service path, then x402 at fee_usdt.',
+            sample_get: 'GET the same service path for a public sample payload.'
+          },
+          services: [...listed, ...unlisted]
+        });
+      }
+
+      if (request.method === 'GET' && PAID_RADAR_ROUTES[url.pathname]) {
+        const route = PAID_RADAR_ROUTES[url.pathname];
+        const meta = getServiceCatalogEntry(url.pathname);
+        const sampleRequest = samplePayloadForPath(url.pathname);
+        const sampleResponse = await route.load(sampleRequest);
+        return json({
+          schema_version: '0.1',
+          mode: 'public_sample',
+          path: url.pathname,
+          fee_usdt: meta?.fee_usdt ?? null,
+          free_trial: 'POST once without payment per client IP, then x402.',
+          sample_request: sampleRequest,
+          sample_response: sampleResponse
         });
       }
 
       if (request.method === 'POST' && PAID_RADAR_ROUTES[url.pathname]) {
         const route = PAID_RADAR_ROUTES[url.pathname];
+        const pathname = url.pathname;
+        const catalog = getServiceCatalogEntry(pathname);
+        const priceAtomic = getFeeAtomicForPath(pathname);
+
         if (!isX402Enabled(env)) {
-          // Compatibility mode (default): behave exactly like the free listing
-          // endpoints that are currently under marketplace review.
           return json(await route.load(await readJson(request)));
         }
+
+        const hasPayment = request.headers.get('payment')
+          || request.headers.get('payment-signature')
+          || request.headers.get('x-payment');
+
+        if (!hasPayment && !(await hasUsedFreeTrial(env, request, pathname))) {
+          const payload = await route.load(await readJson(request));
+          await markFreeTrialUsed(env, request, pathname);
+          return json(
+            withTrialBilling(payload, { pathname, fee_usdt: catalog?.fee_usdt ?? '0.1' }),
+            200,
+            X402_CORS_HEADERS
+          );
+        }
+
         return handlePaidRequest(request, env, {
-          resourceUrl: `${url.origin}${url.pathname}`,
+          resourceUrl: `${url.origin}${pathname}`,
           description: route.description,
-          // Body is only parsed after payment verifies (challenge costs nothing).
+          priceAtomic,
           deliver: async () => route.load(await readJson(request)),
           respond: (payload, status = 200, extraHeaders = undefined) =>
             json(payload, status, { ...X402_CORS_HEADERS, ...(extraHeaders || {}) })
@@ -333,6 +345,29 @@ function pruneCache() {
   const oldestFirst = [...radarCache.entries()].sort((a, b) => a[1].storedAt - b[1].storedAt);
   for (const [key] of oldestFirst.slice(0, radarCache.size - 32)) {
     radarCache.delete(key);
+  }
+}
+
+function samplePayloadForPath(pathname) {
+  switch (pathname) {
+    case '/agent-delivery-acceptance-audit':
+      return {
+        task: 'Ship a read-only health endpoint for the worker.',
+        delivery_summary: 'Added GET /health and npm test passes.',
+        artifacts: ['worker/index.mjs'],
+        validation: ['npm test']
+      };
+    case '/event-price-divergence-radar':
+      return { asset: 'bitcoin', limit: 2 };
+    case '/polymarket-smart-money-radar':
+      return { query: 'bitcoin', limit: 2 };
+    case '/world-cup-smart-money-radar':
+    case '/world-cup-upset-alert':
+      return { query: 'all', limit: 2 };
+    case '/crypto-market-regime-radar':
+      return { focus: 'bitcoin', limit: 2 };
+    default:
+      return { limit: 2 };
   }
 }
 

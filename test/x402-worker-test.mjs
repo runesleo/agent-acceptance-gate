@@ -76,12 +76,12 @@ function resetMock(overrides = {}) {
 
 // ---- helpers ----------------------------------------------------------------
 
-function paymentHeader({ nonce = '0x' + '11'.repeat(32), resourceUrl = undefined } = {}) {
+function paymentHeader({ nonce = '0x' + '11'.repeat(32), resourceUrl = undefined, amount = '100000' } = {}) {
   const now = Math.floor(Date.now() / 1000);
   const accepted = {
     scheme: 'exact',
     network: 'eip155:196',
-    amount: '1000000',
+    amount,
     asset: '0x779ded0c9e1022225f8e0630b35a9b54be713736',
     payTo: '0x1e1a2f7ac1bc6df29a1878c3f26b17dccdc16e15',
     maxTimeoutSeconds: 300,
@@ -106,11 +106,11 @@ function paymentHeader({ nonce = '0x' + '11'.repeat(32), resourceUrl = undefined
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
 }
 
-function post(headers = {}, env = ENV) {
+function post(headers = {}, env = ENV, body = { limit: 1 }) {
   return worker.fetch(new Request(RESOURCE, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
-    body: JSON.stringify({ limit: 1 })
+    body: JSON.stringify(body)
   }), env);
 }
 
@@ -151,37 +151,39 @@ function ok(name) {
   ok('X402_ENABLED=false keeps free behavior and original headers byte-identical');
 }
 
-// ---- 2. enabled, no payment header → 402 challenge ---------------------------
+// ---- 2. enabled, no payment → free trial once, then 402 ----------------------
 
 {
   resetMock();
-  const res = await post();
-  assert.equal(res.status, 402);
-  const challengeHeader = res.headers.get('payment-required');
+  const trialIp = { 'cf-connecting-ip': '203.0.113.50' };
+  const first = await post(trialIp);
+  assert.equal(first.status, 200);
+  const firstBody = await first.json();
+  assert.equal(firstBody.billing?.mode, 'free_trial');
+  assert.equal(firstBody.billing?.list_price_usdt, '0.1');
+  assert.equal(calls.verify + calls.settle + calls.status, 0);
+
+  const second = await post(trialIp);
+  assert.equal(second.status, 402);
+  const challengeHeader = second.headers.get('payment-required');
   assert.ok(challengeHeader, 'PAYMENT-REQUIRED header present');
   const decoded = decodeB64Json(challengeHeader);
-  const body = await res.json();
+  const body = await second.json();
   assert.deepEqual(decoded, body);
   assert.equal(body.x402Version, 2);
   assert.equal(body.error, 'Payment required');
   assert.equal(body.resource.url, RESOURCE);
   const req = body.accepts[0];
-  assert.equal(req.scheme, 'exact');
-  assert.equal(req.network, 'eip155:196');
-  assert.equal(req.amount, '1000000');
-  assert.equal(req.asset, '0x779ded0c9e1022225f8e0630b35a9b54be713736');
-  assert.equal(req.payTo, '0x1e1a2f7ac1bc6df29a1878c3f26b17dccdc16e15');
-  assert.deepEqual(req.extra, { name: 'USD₮0', version: '1' });
-  assert.equal(res.headers.get('access-control-expose-headers'), 'payment-required, payment-response');
+  assert.equal(req.amount, '100000');
   assert.equal(calls.verify + calls.settle + calls.status, 0);
-  ok('no payment header → 402 challenge with PAYMENT-REQUIRED header + JSON body');
+  ok('no payment → first POST free trial, second POST 402 at per-service price');
 }
 
 // ---- 3. official PAYMENT header + verify+settle success → 200 ----------------
 
 {
   resetMock();
-  const res = await post({ PAYMENT: paymentHeader({ nonce: '0x' + 'a1'.repeat(32) }) });
+  const res = await post({ PAYMENT: paymentHeader({ nonce: '0x' + 'a1'.repeat(32), amount: '100000' }), 'cf-connecting-ip': '203.0.113.51' });
   assert.equal(res.status, 200);
   const settle = decodeB64Json(res.headers.get('payment-response'));
   assert.equal(settle.status, 'success');
@@ -196,7 +198,7 @@ function ok(name) {
 
 {
   resetMock({ verify: () => okxEnvelope({ isValid: false, invalidReason: 'invalid_signature' }) });
-  const res = await post({ 'payment-signature': paymentHeader({ nonce: '0x' + 'a2'.repeat(32) }) });
+  const res = await post({ 'payment-signature': paymentHeader({ nonce: '0x' + 'a2'.repeat(32), amount: '100000' }), 'cf-connecting-ip': '203.0.113.52' });
   assert.equal(res.status, 402);
   const body = await res.json();
   assert.equal(body.error, 'invalid_signature');
@@ -217,7 +219,7 @@ function ok(name) {
       () => okxEnvelope({ success: true, status: 'success' })
     ]
   });
-  const res = await post({ PAYMENT: paymentHeader({ nonce: '0x' + 'a3'.repeat(32) }) });
+  const res = await post({ PAYMENT: paymentHeader({ nonce: '0x' + 'a3'.repeat(32), amount: '100000' }), 'cf-connecting-ip': '203.0.113.53' });
   assert.equal(res.status, 200);
   assert.ok(calls.status >= 2, 'polled settle/status until success');
   const settle = decodeB64Json(res.headers.get('payment-response'));
@@ -233,8 +235,8 @@ function ok(name) {
     settle: () => okxEnvelope({ success: false, status: 'timeout', transaction: tx, network: 'eip155:196' }),
     status: [() => okxEnvelope({ success: true, status: 'pending' })]
   });
-  const header = paymentHeader({ nonce: '0x' + 'a4'.repeat(32) });
-  const res = await post({ PAYMENT: header });
+  const header = paymentHeader({ nonce: '0x' + 'a4'.repeat(32), amount: '100000' });
+  const res = await post({ PAYMENT: header, 'cf-connecting-ip': '203.0.113.54' });
   assert.equal(res.status, 402);
   const body = await res.json();
   assert.equal(body.error, 'settlement_pending');
@@ -267,7 +269,8 @@ function ok(name) {
 {
   resetMock();
   const res = await post({
-    PAYMENT: paymentHeader({ nonce: '0x' + 'a5'.repeat(32), resourceUrl: `${BASE}/polymarket-smart-money-radar` })
+    PAYMENT: paymentHeader({ nonce: '0x' + 'a5'.repeat(32), amount: '100000', resourceUrl: `${BASE}/polymarket-smart-money-radar` }),
+    'cf-connecting-ip': '203.0.113.55'
   });
   assert.equal(res.status, 402);
   const body = await res.json();
@@ -280,7 +283,7 @@ function ok(name) {
 
 {
   resetMock({ verify: () => okxEnvelope(null, '50113') });
-  const res = await post({ PAYMENT: paymentHeader({ nonce: '0x' + 'a6'.repeat(32) }) });
+  const res = await post({ PAYMENT: paymentHeader({ nonce: '0x' + 'a6'.repeat(32), amount: '100000' }), 'cf-connecting-ip': '203.0.113.56' });
   assert.equal(res.status, 502);
   const body = await res.json();
   assert.equal(body.error, 'facilitator_error');

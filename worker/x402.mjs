@@ -40,7 +40,7 @@ export const X402_ASSET = {
   version: '1',
   decimals: 6
 };
-// 1 USDT per call, in atomic units (6 decimals).
+// Default price when no per-route override (legacy 1 USDT).
 export const X402_PRICE_ATOMIC = '1000000';
 const MAX_TIMEOUT_SECONDS = 300;
 
@@ -75,12 +75,12 @@ export function isX402Enabled(env) {
   return env?.X402_ENABLED === 'true';
 }
 
-/** Payment requirements advertised for every paid radar endpoint. */
-export function buildPaymentRequirements() {
+/** Payment requirements advertised for a paid endpoint. */
+export function buildPaymentRequirements({ amountAtomic = X402_PRICE_ATOMIC } = {}) {
   return {
     scheme: X402_SCHEME,
     network: X402_NETWORK,
-    amount: X402_PRICE_ATOMIC,
+    amount: amountAtomic,
     asset: X402_ASSET.address,
     payTo: X402_PAY_TO,
     maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
@@ -89,7 +89,7 @@ export function buildPaymentRequirements() {
   };
 }
 
-function buildPaymentRequired({ resourceUrl, description, error }) {
+function buildPaymentRequired({ resourceUrl, description, error, amountAtomic }) {
   const paymentRequired = {
     x402Version: X402_VERSION,
     resource: {
@@ -97,7 +97,7 @@ function buildPaymentRequired({ resourceUrl, description, error }) {
       description: description || '',
       mimeType: 'application/json'
     },
-    accepts: [buildPaymentRequirements()]
+    accepts: [buildPaymentRequirements({ amountAtomic })]
   };
   if (error) paymentRequired.error = error;
   return paymentRequired;
@@ -114,9 +114,9 @@ function buildPaymentRequired({ resourceUrl, description, error }) {
  *   respond: (payload, status, extraHeaders) => Response
  * @returns Response
  */
-export async function handlePaidRequest(request, env, { resourceUrl, description, deliver, respond }) {
+export async function handlePaidRequest(request, env, { resourceUrl, description, deliver, respond, priceAtomic = X402_PRICE_ATOMIC }) {
   const challenge = (error) => {
-    const paymentRequired = buildPaymentRequired({ resourceUrl, description, error });
+    const paymentRequired = buildPaymentRequired({ resourceUrl, description, error, amountAtomic: priceAtomic });
     return respond(paymentRequired, 402, {
       'PAYMENT-REQUIRED': base64EncodeUtf8(JSON.stringify(paymentRequired))
     });
@@ -145,7 +145,7 @@ export async function handlePaidRequest(request, env, { resourceUrl, description
     return challenge('Payment resource mismatch: payment was created for a different resource URL');
   }
 
-  const requirements = buildPaymentRequirements();
+  const requirements = buildPaymentRequirements({ amountAtomic: priceAtomic });
   if (!requirementsMatch(requirements, paymentPayload.accepted)) {
     return challenge('No matching payment requirements found');
   }
@@ -227,7 +227,8 @@ export async function handlePaidRequest(request, env, { resourceUrl, description
   const paymentRequired = buildPaymentRequired({
     resourceUrl,
     description,
-    error: settleResult?.errorReason || 'settlement_failed'
+    error: settleResult?.errorReason || 'settlement_failed',
+    amountAtomic: priceAtomic
   });
   return respond(paymentRequired, 402, {
     ...paymentResponseHeader(settleResult ?? {}),
