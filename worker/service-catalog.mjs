@@ -82,6 +82,14 @@ export const SERVICE_CATALOG = {
     fee_usdt: '0.1',
     fee_atomic: '100000',
     mode: 'live_unlisted'
+  },
+  '/content-verify-claims': {
+    service_id: 'content_verify_claims',
+    title: 'Content Verify Claims',
+    category: 'agent_ops',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live_unlisted'
   }
 };
 
@@ -152,6 +160,12 @@ export const PENDING_OKX_LISTING_COPY = {
     serviceDescription:
       'Event evidence card from public Gamma metadata: implied view, priced-in notes, uncertainties, tradability.\n'
       + '预测市场事件解读卡：定价已反映什么、不确定性、可交易性。输入 market_url 或 slug；不下单建议。'
+  },
+  content_verify_claims: {
+    serviceName: 'Content Verify Claims',
+    serviceDescription:
+      'Rule-based check that publish claims overlap caller-supplied source excerpts; pass, needs_review, or fail.\n'
+      + '发布前断言核查：对照你提供的原文摘录核对数字/关键词。输入 claims[] + sources[].text；不抓网页。'
   }
 };
 

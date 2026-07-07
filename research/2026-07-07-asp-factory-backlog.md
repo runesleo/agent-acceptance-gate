@@ -51,7 +51,7 @@ Leo Labs (#3977) @ api.leolabs.me
 | B1 | **Token DD Verdict** | `asset-dd` Quick + `auditor.mjs` | `POST /token-dd-verdict` | 0.05 | Finance + Utility | ✅ code `live_unlisted` |
 | B2 | **PM Trade Preflight** | `pm-decision-card` 规则层 | `POST /pm-trade-preflight` | 0.1 | Finance + Best Product | ✅ code `live_unlisted` |
 | B3 | **PM Event Readout** | `pm-event-readout` skill | `POST /pm-event-readout` | 0.1 | Finance | ✅ code `live_unlisted` deployed |
-| B4 | **Content Verify API** | `content-verify` + `leo-route review` | `POST /content-verify-claims` | 0.1 | Software Utility |
+| B4 | **Content Verify API** | `content-verify` + 规则层 | `POST /content-verify-claims` | 0.1 | Software Utility | ✅ code `live_unlisted` |
 | B5 | **Humanize API** | `skill-api` Hono | 迁入 Worker 或反代 | 0.05 | Software Utility |
 
 **Wave B 优先级**：B1 → B2 → B4 → B3 → B5（黑客松 demo 主角：B2 + A3 + B1）。

@@ -31,6 +31,7 @@ post '/agent-delivery-acceptance-audit' '{"task":"Self-call smoke","delivery_sum
 post '/token-dd-verdict' '{"asset":"ETH"}'
 post '/event-price-divergence-radar' '{"asset":"bitcoin","limit":2}'
 post '/pm-event-readout' "{\"slug\":\"$SLUG\"}"
+post '/content-verify-claims' '{"claims":["Demo claim with 358 ASPs."],"sources":[{"text":"Scan shows 358 ASPs on marketplace."}]}'
 post '/pm-trade-preflight' "{\"slug\":\"$SLUG\",\"side\":\"yes\",\"size_usd\":50}"
 post '/crypto-market-regime-radar' '{"focus":"bitcoin","limit":2}'
 

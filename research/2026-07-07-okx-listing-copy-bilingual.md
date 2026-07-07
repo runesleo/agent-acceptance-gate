@@ -60,6 +60,8 @@ L2: 事件概率与币价背离雷达：PM 24h 概率变动 vs OKX 现货 24h �
 | world_cup_upset_alert | World Cup Upset Alert | 0.1 | `/world-cup-upset-alert` |
 | token_dd_verdict | Token DD Verdict | 0.05 | `/token-dd-verdict` |
 | pm_trade_preflight | PM Trade Preflight | 0.1 | `/pm-trade-preflight` |
+| pm_event_readout | PM Event Readout | 0.1 | `/pm-event-readout` |
+| content_verify_claims | Content Verify Claims | 0.1 | `/content-verify-claims` |
 
 ### Crypto Market Regime Radar
 
@@ -89,6 +91,20 @@ L1: Read-only trade/watch/skip gate before a Polymarket order; checks liquidity,
 L2: 预测市场下单前检查：trade/观望/跳过，只读不下单。输入 market_url 或 slug + side(yes/no)，可选 size_usd。
 ```
 
+### PM Event Readout
+
+```
+L1: Event evidence card from public Gamma metadata: implied view, priced-in notes, uncertainties, tradability.
+L2: 预测市场事件解读卡：定价已反映什么、不确定性、可交易性。输入 market_url 或 slug；不下单建议。
+```
+
+### Content Verify Claims
+
+```
+L1: Rule-based check that publish claims overlap caller-supplied source excerpts; pass, needs_review, or fail.
+L2: 发布前断言核查：对照你提供的原文摘录核对数字/关键词。输入 claims[] + sources[].text；不抓网页。
+```
+
 ---
 
 ## 对外中文对照（X / 参赛帖用，非 listing 字段）
@@ -98,6 +114,8 @@ L2: 预测市场下单前检查：trade/观望/跳过，只读不下单。输入
 | Agent Delivery Audit Gate | Agent 交付验收闸门 |
 | Event Price Divergence Radar | 事件概率×币价背离雷达 |
 | PM Trade Preflight | 预测市场下单前检查 |
+| PM Event Readout | 预测市场事件解读卡 |
+| Content Verify Claims | 发布前断言核查 |
 | Token DD Verdict | 代币快速尽调闸门 |
 | Crypto Market Regime Radar | 加密市场状态雷达 |
 | World Cup Smart Money Radar | 世界杯聪明钱雷达 |

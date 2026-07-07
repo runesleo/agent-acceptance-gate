@@ -32,6 +32,9 @@ import {
   assessPmEventReadoutLive,
   buildPmEventReadoutFallback
 } from '../src/pm-event-readout.mjs';
+import {
+  assessContentVerifyClaims
+} from '../src/content-verify-claims.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
@@ -84,6 +87,10 @@ const PAID_RADAR_ROUTES = {
   '/pm-event-readout': {
     description: 'PM Event Readout — event evidence card from public Gamma metadata: implied view, priced-in notes, uncertainties, and tradability before trade decisions.',
     load: (payload) => pmEventReadoutWithCache(payload)
+  },
+  '/content-verify-claims': {
+    description: 'Content Verify Claims — rule-based check that publish claims overlap caller-supplied source excerpts (numbers + keywords); returns pass, needs_review, or fail.',
+    load: (payload) => runContentVerifyClaims(payload)
   }
 };
 
@@ -329,6 +336,10 @@ async function pmEventReadoutWithCache(payload) {
   });
 }
 
+function runContentVerifyClaims(payload) {
+  return assessContentVerifyClaims(payload);
+}
+
 // ---- Agent Delivery Audit Gate ---------------------------------------------
 // Accepts either the full auditor schema ({task, delivery, context}) or the
 // compact buyer shape {task, delivery_summary, artifacts, validation,
@@ -446,6 +457,13 @@ function samplePayloadForPath(pathname) {
       return { slug: 'will-egypt-win-the-2026-fifa-world-cup', side: 'yes' };
     case '/pm-event-readout':
       return { slug: 'will-egypt-win-the-2026-fifa-world-cup' };
+    case '/content-verify-claims':
+      return {
+        claims: ['Platform has about 360 ASPs and roughly 3000 cumulative calls.'],
+        sources: [{
+          text: 'Marketplace scan on 2026-07-07: 358 unique ASPs and about 2982 cumulative soldCount.'
+        }]
+      };
     default:
       return { limit: 2 };
   }

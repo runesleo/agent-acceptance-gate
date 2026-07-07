@@ -3,6 +3,7 @@ import worker from '../worker/index.mjs';
 import { assessTokenDdVerdictLive } from '../src/token-dd-verdict.mjs';
 import { assessPmTradePreflightLive } from '../src/pm-trade-preflight.mjs';
 import { assessPmEventReadoutLive } from '../src/pm-event-readout.mjs';
+import { assessContentVerifyClaims } from '../src/content-verify-claims.mjs';
 
 const BASE = 'https://gate.example.com';
 
@@ -121,6 +122,26 @@ const BASE = 'https://gate.example.com';
   assert.equal(readout.next_decision_card_needed, 'yes');
 }
 
+// ---- unit: content-verify-claims ------------------------------------------
+
+{
+  const pass = assessContentVerifyClaims({
+    claims: ['OKX marketplace has 358 ASPs and 2982 cumulative calls.'],
+    sources: [{ text: 'Scan found 358 unique ASPs and 2982 soldCount on 2026-07-07.' }]
+  });
+  assert.ok(['pass', 'needs_review'].includes(pass.verdict));
+  assert.equal(pass.service_id, 'content_verify_claims');
+}
+
+{
+  const fail = assessContentVerifyClaims({
+    claims: ['Revenue hit 10 million USD yesterday.'],
+    sources: [{ text: 'The product is still in beta with zero customers.' }]
+  });
+  assert.ok(['fail', 'needs_review'].includes(fail.verdict));
+  assert.ok(fail.unsupported.length >= 1 || fail.conflicts.length >= 1);
+}
+
 // ---- worker integration (degraded fallback, no external network) ------------
 
 const savedFetch = globalThis.fetch;
@@ -164,6 +185,18 @@ try {
   assert.equal(readRes.status, 200);
   const readBody = await readRes.json();
   assert.equal(readBody.service_id, 'pm_event_readout');
+
+  const verifyRes = await worker.fetch(new Request(`${BASE}/content-verify-claims`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      claims: ['Platform has about 360 ASPs.'],
+      sources: [{ text: 'Marketplace scan: 358 unique ASPs on 2026-07-07.' }]
+    })
+  }));
+  assert.equal(verifyRes.status, 200);
+  const verifyBody = await verifyRes.json();
+  assert.equal(verifyBody.service_id, 'content_verify_claims');
 
   const sample = await worker.fetch(new Request(`${BASE}/token-dd-verdict`, { method: 'GET' })).then((r) => r.json());
   assert.equal(sample.mode, 'public_sample');
