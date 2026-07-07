@@ -20,6 +20,14 @@ import {
   assessWorldCupUpsetAlertLive,
   buildWorldCupUpsetAlertFallback
 } from '../src/world-cup-upset-alert.mjs';
+import {
+  assessTokenDdVerdictLive,
+  buildTokenDdVerdictFallback
+} from '../src/token-dd-verdict.mjs';
+import {
+  assessPmTradePreflightLive,
+  buildPmTradePreflightFallback
+} from '../src/pm-trade-preflight.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
@@ -60,6 +68,14 @@ const PAID_RADAR_ROUTES = {
     description: 'Agent Delivery Audit Gate — audits an agent task delivery (evidence, validation, hard gates) and returns pass / needs_review / fail with a buyer summary.',
     // Deterministic per-payload audit — no cache (every audit input is unique).
     load: (payload) => runDeliveryAcceptanceAudit(payload)
+  },
+  '/token-dd-verdict': {
+    description: 'Token DD Verdict — Quick-tier rule-based token research gate with optional DexScreener liquidity scan for EVM contracts; returns avoid/watch/research/tiny_speculative/conviction buckets.',
+    load: (payload) => tokenDdVerdictWithCache(payload)
+  },
+  '/pm-trade-preflight': {
+    description: 'PM Trade Preflight — read-only trade/watch/skip gate before a Polymarket order using public Gamma market metadata (liquidity, price zone, spread).',
+    load: (payload) => pmTradePreflightWithCache(payload)
   }
 };
 
@@ -255,6 +271,38 @@ async function worldCupUpsetAlertWithCache(payload) {
   });
 }
 
+async function tokenDdVerdictWithCache(payload) {
+  const asset = String(payload?.asset ?? payload?.token ?? payload?.query ?? '').trim().toLowerCase();
+  if (!asset) {
+    throw new Error('token-dd-verdict requires asset (ticker, contract address, or URL).');
+  }
+
+  return radarWithCache({
+    cacheKey: `token-dd|${asset}`,
+    loadLive: () => assessTokenDdVerdictLive(payload),
+    loadFallback: () => buildTokenDdVerdictFallback(payload)
+  });
+}
+
+async function pmTradePreflightWithCache(payload) {
+  const ref = String(
+    payload?.condition_id
+    ?? payload?.slug
+    ?? payload?.market_url
+    ?? ''
+  ).trim().toLowerCase();
+  const side = String(payload?.side ?? 'yes').trim().toLowerCase();
+  if (!ref) {
+    throw new Error('pm-trade-preflight requires market_url, condition_id, or slug.');
+  }
+
+  return radarWithCache({
+    cacheKey: `preflight|${ref}|${side}|${payload?.size_usd ?? ''}`,
+    loadLive: () => assessPmTradePreflightLive(payload),
+    loadFallback: () => buildPmTradePreflightFallback(payload)
+  });
+}
+
 // ---- Agent Delivery Audit Gate ---------------------------------------------
 // Accepts either the full auditor schema ({task, delivery, context}) or the
 // compact buyer shape {task, delivery_summary, artifacts, validation,
@@ -332,7 +380,7 @@ async function radarWithCache({ cacheKey, loadLive, loadFallback }) {
     const fallback = loadFallback();
     fallback.mode = 'degraded';
     fallback.caveats = [
-      `Live Polymarket fetch failed (${error instanceof Error ? error.message : String(error)}); serving static fallback data.`,
+      `Live upstream fetch failed (${error instanceof Error ? error.message : String(error)}); serving static fallback data.`,
       'Do not trade on this response. Retry shortly for live data.',
       ...fallback.caveats
     ];
@@ -366,6 +414,10 @@ function samplePayloadForPath(pathname) {
       return { query: 'all', limit: 2 };
     case '/crypto-market-regime-radar':
       return { focus: 'bitcoin', limit: 2 };
+    case '/token-dd-verdict':
+      return { asset: '0x000000000000000000000000000000000000dead' };
+    case '/pm-trade-preflight':
+      return { slug: 'will-donald-trump-win-the-2024-us-presidential-election', side: 'yes' };
     default:
       return { limit: 2 };
   }
