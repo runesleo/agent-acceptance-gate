@@ -38,7 +38,12 @@ import {
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
-import { hasUsedFreeTrial, markFreeTrialUsed, withTrialBilling } from './trial.mjs';
+import {
+  hasUsedFreeTrial,
+  isFreeTrialEnabled,
+  markFreeTrialUsed,
+  withTrialBilling
+} from './trial.mjs';
 
 // Base headers are byte-identical to the pre-paywall deployment; x402-specific
 // CORS additions are only applied when X402_ENABLED === 'true'.
@@ -49,7 +54,7 @@ const JSON_HEADERS = {
   'access-control-allow-headers': 'content-type'
 };
 
-// Paid A2MCP endpoints (per-service x402 fee + one free trial per client IP when enabled).
+// Paid A2MCP endpoints (per-service x402 fee; optional one free trial per IP when X402_FREE_TRIAL=true).
 const PAID_RADAR_ROUTES = {
   '/world-cup-smart-money-radar': {
     description: 'World Cup Smart Money Radar — tracks profitable World Cup prediction-market wallets and highlights position changes.',
@@ -81,11 +86,11 @@ const PAID_RADAR_ROUTES = {
     load: (payload) => tokenDdVerdictWithCache(payload)
   },
   '/pm-trade-preflight': {
-    description: 'PM Trade Preflight — read-only trade/watch/skip gate before a Polymarket order using public Gamma market metadata (liquidity, price zone, spread).',
+    description: 'PM Trade Preflight — read-only eligible/watch/skip gate before a Polymarket order using public Gamma market metadata (liquidity, price zone, spread). eligible means mechanical checks passed, not a buy tip.',
     load: (payload) => pmTradePreflightWithCache(payload)
   },
   '/pm-event-readout': {
-    description: 'PM Event Readout — event evidence card from public Gamma metadata: implied view, priced-in notes, uncertainties, and tradability before trade decisions.',
+    description: 'PM Event Analyst — same-event matrix + honest tradability; Football L1 merges parent children (fixture gate, state map, expression comparison). Not a buy tip.',
     load: (payload) => pmEventReadoutWithCache(payload)
   },
   '/content-verify-claims': {
@@ -116,19 +121,21 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname === '/api/okx-ai-services') {
+        const trialOn = isFreeTrialEnabled(env);
         const listed = [...LISTED_SERVICE_PATHS].map((path) => {
           const meta = SERVICE_CATALOG[path];
           const route = PAID_RADAR_ROUTES[path];
-          return {
+          const row = {
             service_id: meta.service_id,
             path,
             title: meta.title,
             category: meta.category,
             fee_usdt: meta.fee_usdt,
-            free_trial: 'one_per_client_ip_per_service',
             description: route?.description ?? meta.title,
             mode: meta.mode
           };
+          if (trialOn) row.free_trial = 'one_per_client_ip_per_service';
+          return row;
         });
         const unlisted = Object.entries(SERVICE_CATALOG)
           .filter(([path]) => !LISTED_SERVICE_PATHS.has(path))
@@ -145,7 +152,9 @@ export default {
           mode: 'edge_worker_live',
           billing: {
             x402_enabled: isX402Enabled(env),
-            free_trial: 'One POST per client IP per service path, then x402 at fee_usdt.',
+            free_trial: trialOn
+              ? 'One POST per client IP per service path, then x402 at fee_usdt.'
+              : 'disabled (unpaid POST returns 402; set X402_FREE_TRIAL=true to opt in)',
             sample_get: 'GET the same service path for a public sample payload.'
           },
           services: [...listed, ...unlisted]
@@ -157,15 +166,24 @@ export default {
         const meta = getServiceCatalogEntry(url.pathname);
         const sampleRequest = samplePayloadForPath(url.pathname);
         const sampleResponse = await route.load(sampleRequest);
-        return json({
+        const trialOn = isFreeTrialEnabled(env);
+        const body = {
           schema_version: '0.1',
           mode: 'public_sample',
           path: url.pathname,
           fee_usdt: meta?.fee_usdt ?? null,
-          free_trial: 'POST once without payment per client IP, then x402.',
           sample_request: sampleRequest,
           sample_response: sampleResponse
-        });
+        };
+        if (trialOn) {
+          body.free_trial = 'POST once without payment per client IP, then x402.';
+        } else {
+          body.billing = {
+            mode: 'x402',
+            unpaid_post: 'HTTP 402 payment-required challenge'
+          };
+        }
+        return json(body);
       }
 
       if (request.method === 'POST' && PAID_RADAR_ROUTES[url.pathname]) {
@@ -182,7 +200,12 @@ export default {
           || request.headers.get('payment-signature')
           || request.headers.get('x-payment');
 
-        if (!hasPayment && !(await hasUsedFreeTrial(env, request, pathname))) {
+        // Opt-in free trial only. Default unpaid path must 402 for OKX listing checks.
+        if (
+          !hasPayment
+          && isFreeTrialEnabled(env)
+          && !(await hasUsedFreeTrial(env, request, pathname))
+        ) {
           const payload = await route.load(await readJson(request));
           await markFreeTrialUsed(env, request, pathname);
           return json(
@@ -329,8 +352,18 @@ async function pmEventReadoutWithCache(payload) {
     throw new Error('pm-event-readout requires market_url, condition_id, or slug.');
   }
 
+  // Fixture / musk / tennis options change the enriched output — must be part of cache key.
+  const football = payload?.football && typeof payload.football === 'object' ? payload.football : null;
+  const tennis = payload?.tennis && typeof payload.tennis === 'object' ? payload.tennis : null;
+  const musk = payload?.musk && typeof payload.musk === 'object' ? payload.musk : null;
+  const optionKey = [
+    football?.verified === true ? `fv:${football.market_fixture_match || 'yes'}` : 'fv:none',
+    tennis?.verified === true ? `tv:${tennis.market_fixture_match || 'yes'}` : 'tv:none',
+    musk?.current_count != null ? `mc:${musk.current_count}` : 'mc:none'
+  ].join('|');
+
   return radarWithCache({
-    cacheKey: `readout|${ref}`,
+    cacheKey: `readout|${ref}|${optionKey}`,
     loadLive: () => assessPmEventReadoutLive(payload),
     loadFallback: () => buildPmEventReadoutFallback(payload)
   });
@@ -454,9 +487,17 @@ function samplePayloadForPath(pathname) {
     case '/token-dd-verdict':
       return { asset: '0x000000000000000000000000000000000000dead' };
     case '/pm-trade-preflight':
-      return { slug: 'will-egypt-win-the-2026-fifa-world-cup', side: 'yes' };
+      return { slug: 'will-argentina-win-the-2026-fifa-world-cup-245', side: 'yes' };
     case '/pm-event-readout':
-      return { slug: 'will-egypt-win-the-2026-fifa-world-cup' };
+      return {
+        slug: 'fifwc-fra-mar-2026-07-09-fra',
+        football: {
+          verified: true,
+          market_fixture_match: 'yes',
+          scheduled_time_utc: '2026-07-09T20:00:00Z',
+          fixture_sources: ['caller_verified']
+        }
+      };
     case '/content-verify-claims':
       return {
         claims: ['Platform has about 360 ASPs and roughly 3000 cumulative calls.'],

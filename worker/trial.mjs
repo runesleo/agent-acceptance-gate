@@ -3,8 +3,16 @@ const TRIAL_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days per client+service
 /**
  * One free POST per client IP per service path, tracked in TRIAL_KV when bound.
  * Falls back to an in-isolate Map (best-effort) for local tests.
+ *
+ * Default OFF. OKX.AI listing x402-check / review probes treat any unpaid HTTP 200
+ * as "not a valid x402 service". Opt in only with X402_FREE_TRIAL=true after listing.
  */
 const memoryTrials = new Map();
+
+/** Free trial is opt-in. Anything except the string "true" keeps unpaid POSTs on 402. */
+export function isFreeTrialEnabled(env) {
+  return env?.X402_FREE_TRIAL === 'true';
+}
 
 export async function trialKeyForRequest(request, pathname) {
   const ip = request.headers.get('cf-connecting-ip')

@@ -3,14 +3,15 @@
 //
 // Covers:
 //   1. X402_ENABLED=false → byte-identical free behavior (status + headers)
-//   2. enabled + no payment header → 402 challenge (header + body)
-//   3. enabled + official `PAYMENT` header accepted
-//   4. verify isValid=false → 402, settle never called
-//   5. settle pending → settle/status poll → success → 200 delivered
-//   6. settle timeout → still pending → 402 pending_tx; replay same payment
+//   2. enabled + no payment → 402 by default (free trial opt-in only)
+//   3. enabled + X402_FREE_TRIAL=true → one free POST, then 402
+//   4. enabled + official `PAYMENT` header accepted
+//   5. verify isValid=false → 402, settle never called
+//   6. settle pending → settle/status poll → success → 200 delivered
+//   7. settle timeout → still pending → 402 pending_tx; replay same payment
 //      after confirmation → 200 delivered with NO second settle call
-//   7. resource.url mismatch → 402, no facilitator calls
-//   8. OKX envelope code!=="0" → 502 facilitator_error with generic code only
+//   8. resource.url mismatch → 402, no facilitator calls
+//   9. OKX envelope code!=="0" → 502 facilitator_error with generic code only
 
 import assert from 'node:assert/strict';
 import worker from '../worker/index.mjs';
@@ -151,19 +152,39 @@ function ok(name) {
   ok('X402_ENABLED=false keeps free behavior and original headers byte-identical');
 }
 
-// ---- 2. enabled, no payment → free trial once, then 402 ----------------------
+// ---- 2. enabled, no payment → 402 by default (listing-safe) -------------------
 
 {
   resetMock();
+  const res = await post({ 'cf-connecting-ip': '203.0.113.49' });
+  assert.equal(res.status, 402);
+  const challengeHeader = res.headers.get('payment-required');
+  assert.ok(challengeHeader, 'PAYMENT-REQUIRED header present');
+  const decoded = decodeB64Json(challengeHeader);
+  const body = await res.json();
+  assert.deepEqual(decoded, body);
+  assert.equal(body.x402Version, 2);
+  assert.equal(body.error, 'Payment required');
+  assert.equal(body.resource.url, RESOURCE);
+  assert.equal(body.accepts[0].amount, '100000');
+  assert.equal(calls.verify + calls.settle + calls.status, 0);
+  ok('no payment → unpaid POST returns 402 when free trial disabled (default)');
+}
+
+// ---- 2b. X402_FREE_TRIAL=true → free trial once, then 402 --------------------
+
+{
+  resetMock();
+  const trialEnv = { ...ENV, X402_FREE_TRIAL: 'true' };
   const trialIp = { 'cf-connecting-ip': '203.0.113.50' };
-  const first = await post(trialIp);
+  const first = await post(trialIp, trialEnv);
   assert.equal(first.status, 200);
   const firstBody = await first.json();
   assert.equal(firstBody.billing?.mode, 'free_trial');
   assert.equal(firstBody.billing?.list_price_usdt, '0.1');
   assert.equal(calls.verify + calls.settle + calls.status, 0);
 
-  const second = await post(trialIp);
+  const second = await post(trialIp, trialEnv);
   assert.equal(second.status, 402);
   const challengeHeader = second.headers.get('payment-required');
   assert.ok(challengeHeader, 'PAYMENT-REQUIRED header present');
@@ -176,7 +197,7 @@ function ok(name) {
   const req = body.accepts[0];
   assert.equal(req.amount, '100000');
   assert.equal(calls.verify + calls.settle + calls.status, 0);
-  ok('no payment → first POST free trial, second POST 402 at per-service price');
+  ok('X402_FREE_TRIAL=true → first POST free trial, second POST 402');
 }
 
 // ---- 3. official PAYMENT header + verify+settle success → 200 ----------------
