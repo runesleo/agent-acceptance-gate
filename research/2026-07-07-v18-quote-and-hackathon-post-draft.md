@@ -118,9 +118,57 @@ api.leolabs.me
 | TG | runesleo |
 | Participation Post | ⏳ 发帖后回填链接 |
 
-### recommended（英文 · 含 ≤90s demo · #Okxai）
+### recommended（中文主帖 · Leo 2026-07-11 拍板：中文优先，英文没流量）
 
-I'm one person building Leo Labs for OKX.AI.
+writer_model: grok-4.5 · writer_route: leo-grok · non_grok_prose: none
+
+#### LIVE（过审后发 · 默认）
+
+一个人做 Leo Labs。
+OKX.AI Agent #3977，已上架。
+
+被 agent 坑过太多次。
+说交付了，证据没有。
+说跑完了，打开一看是空的。
+
+后来改了：不先堆信号，先装闸门。
+工人说做完了——证据在哪？
+过不了，就不收。
+
+48 秒 demo 两把尖刀：
+Agent Delivery Audit Gate，卡空口交付。
+Football Event Analyst，同场 8 个关联事件、覆盖 350 个市场，一次摊开，不复读单个赔率。
+
+卖闸门，卖证据。不喊单。
+
+入口 api.leolabs.me
+#Okxai
+
+#### PRE_LISTING（审核中口径 · 一般不发）
+
+一个人做 Leo Labs。
+OKX.AI Agent #3977，提审冲上架。
+
+被 agent 坑过太多次。
+说交付了，证据没有。
+说跑完了，打开一看是空的。
+
+后来改了：不先堆信号，先装闸门。
+工人说做完了——证据在哪？
+过不了，就不收。
+
+48 秒 demo 两把尖刀：
+Agent Delivery Audit Gate，卡空口交付。
+Football Event Analyst，同场 8 个关联事件、覆盖 350 个市场，一次摊开，不复读单个赔率。
+
+卖闸门，卖证据。不喊单。
+
+入口 api.leolabs.me
+#Okxai
+
+### 英文稿（降级备查 · 不主推）
+
+I'm one person. Leo Labs is live on OKX.AI (#3977).
 
 I got burned by agents that said "done" with no evidence.
 So I built gates first — not another signal feed.
@@ -131,27 +179,19 @@ So I built gates first — not another signal feed.
 
 api.leolabs.me #Okxai
 
-### 中文 thread 首条（可选滞后发）
-
-一个人做一家 agent 公司。
-
-如果工人说交付了，那证据在哪？
-如果只给你一个赔率，那同场 8 个事件覆盖的 350 个市场呢？
-
-我卡在空口交付太多次，改成先过闸门。
-#3977 Leo Labs · OKX.AI
-Audit Gate + Football Event Analyst（8 linked events covering 350 markets）。
-
-结论：卖闸门，不喊单。#Okxai
-
 ### Humanizer / Voice
 
 ```text
 - text_quality_tier: main_publish
-- final_text_taste: AI=3.0 / YOU=59.5 / scope=final_text_only (ZH) · EN AI=13.0 / YOU=56.8 · draft-file YOU≈58 warning_margin
-- liuren-edit-pass: pass
-- voice-layer v3 audit: 6/7 clean · missing #scene-time-crumb (demo supplies it) · no AI-腔红线
+- language_primary: zh (Leo override 2026-07-11: EN low traffic)
+- writer_model: grok-4.5
+- writer_route: leo-grok
+- non_grok_prose: none
+- final_text_taste: pending_recheck_after_leo_taste
+- liuren-edit-pass: pending_leo_review
+- voice-layer v3 audit: pending_leo_review
 - manual_polish_gate: pending_leo_review
+- preview: /Users/zhangxu/Projects/_inventory/2026-07-10/t0521-hackathon-post-preview.html
 ```
 
 ---
