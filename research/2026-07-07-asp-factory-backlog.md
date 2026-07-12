@@ -6,8 +6,9 @@
 
 1. **两步走**：Phase 1 把现成能力商品化 → Phase 2 从素材库挖新需求。
 2. **自用 + 外用**：Codex/Hermes 与外部 agent 同调 `api.leolabs.me`。
-3. **卖 gate，不卖 voice**：内容线卖 verify/humanize/readiness，不整包卖 `leo-style` / 账号发布。
+3. **卖 gate，不卖 voice**：内容线卖 verify / slop-check / readiness，不整包卖 `leo-style` / 账号发布。
 4. **工厂流水线**：`skill/repo 逻辑 → api.leolabs.me endpoint → onchainos listing → GitHub README`（目标 **1–3 天/SKU**）。
+5. **ASP 不调 relay**：四订阅 lane（Claude/Codex/Cursor/Grok）仅 Leo 自用；外人 x402 服务 = 规则 + 公开 API，**零 LLM 边际成本**。
 
 ---
 
@@ -16,12 +17,17 @@
 ```
 Leo Labs (#3977) @ api.leolabs.me
 ├── Agent Trust      → Delivery Audit Gate（护城河）
-├── PM Intelligence  → Preflight / Event Readout / Divergence / Regime / Toolkit API
-├── Research         → Token DD Verdict / (Full DD escrow)
-└── Creator Ops      → Content Verify / Humanize / Publish Gate / Visual Spec
+├── PM Intelligence  → **PM Event Analyst（通用核）** + Preflight + 品类插件/可选 SKU
+│                      框架 SSOT: research/2026-07-09-pm-event-analyst-framework.md
+│                      双面契约: research/2026-07-12-pm-event-analyst-dual-surface-contract.md
+│                      （人面=T0530 Copilot Research Unit · agent 面=/pm-event-readout · OKX=渠道）
+│                      （聪明钱/Regime 等非主线，不优先扩）
+├── Research         → Token DD → 对齐 Codex asset-dd skill（另对照；非薄 verdict 门面）
+└── Creator Ops      → Content Verify / Slop Check / Publish Gate / Visual Spec
 ```
 
-**对外叙事**：多 SKU 工厂 + PM 原生 + Agent 信任层（非 AlphaRadar 式单点 8 步研报）。
+**对外叙事（2026-07-09 修正）**：尖刀 = skill 级厚度（事件分析 / 投研），不是薄接口货架占位。  
+**PM 线挂法**：一个 Agent 能力 + 一个主服务；品类先 plugin，§准入过关再拆 SKU。
 
 ---
 
@@ -37,7 +43,7 @@ Leo Labs (#3977) @ api.leolabs.me
 | A4 | Event Price Divergence Radar | listing 审核中 | 过审即可 | OKX listed |
 | A5 | Crypto Market Regime Radar | `live_unlisted` | `onchainos create` + activate | listed 后 |
 | A6 | World Cup Upset Alert | `live_unlisted` | `onchainos create` + activate | listed 后 |
-| A7 | v18 Quote 推 + listing 截图 | 草稿 READY | 审核通过后发 | publish gate |
+| A7 | v18 Quote 推 + listing 截图 | 草稿见 `2026-07-07-v18-quote-and-hackathon-post-draft.md` | 审核通过后发 | publish gate |
 | A8 | Hackathon 参赛帖 + ≤90s demo | 脚本待 v2 | #Okxai + 填表 | listed 后 |
 
 **Wave A 完成后 SKU 数**：6 listed（+2 自 A5/A6）。
@@ -52,9 +58,11 @@ Leo Labs (#3977) @ api.leolabs.me
 | B2 | **PM Trade Preflight** | `pm-decision-card` 规则层 | `POST /pm-trade-preflight` | 0.1 | Finance + Best Product | ✅ code `live_unlisted` |
 | B3 | **PM Event Readout** | `pm-event-readout` skill | `POST /pm-event-readout` | 0.1 | Finance | ✅ code `live_unlisted` deployed |
 | B4 | **Content Verify API** | `content-verify` + 规则层 | `POST /content-verify-claims` | 0.1 | Software Utility | ✅ code `live_unlisted` |
-| B5 | **Humanize API** | `skill-api` Hono | 迁入 Worker 或反代 | 0.05 | Software Utility |
+| B5 | **Content Slop Check** | `publish-gate` / `stop-slop` 规则层 | `POST /content-slop-check` | 0.05 | Software Utility · **未实现** |
 
-**Wave B 优先级**：B1 → B2 → B4 → B3 → B5（黑客松 demo 主角：B2 + A3 + B1）。
+**Wave B 优先级**：B1 → B2 → B4 → B3 → B5（黑客松 demo 主角：B2 + A3 + B1）。**B5 排 Wave C 后**，不挡 7/17。
+
+**B5 不做**：GLM/relay 改写、`skill-api` Hono 迁移、调用方代烧 Leo 订阅额度。
 
 ---
 
@@ -151,11 +159,49 @@ Leo Labs (#3977) @ api.leolabs.me
 - **输入**：`claims[]` + `sources[]`（URL 或摘录）
 - **输出**：`consensus`、`conflicts[]`、`unsupported[]`、`verdict`（`pass` | `needs_review` | `fail`）
 
-### B5 — Humanize API
+### B5 — Content Slop Check（规则版 · 替代 Humanize）
 
-- **输入**：`text`、`locale`（`zh` | `en`）
-- **输出**：`humanized_text`、`slop_flags[]`
-- **实现**：合并 `skill-api` 或 Worker 内调 GLM（需 API key 环境变量，不暴露给客户端）
+- **输入**：`text`（必填）、`locale`（`zh` | `en`，默认 `en`）
+- **输出**：
+  - `verdict`：`pass` | `needs_edit` | `fail`
+  - `slop_score_0_100`（越高越像 AI 模板腔）
+  - `slop_flags[]`：`{ id, severity, excerpt, hint }`
+  - `readability`：`{ avg_sentence_len, listicle_density, hedge_word_count }`
+  - `suggested_actions[]`（只给编辑方向，**不改写正文**）
+- **规则层（首版，无 LLM）**：
+  - 套话/空洞词表（中英）：`delve` / `landscape` / `值得注意的是` / `综上所述` 等
+  - 结构腔：三连列表密度、破折号滥用、全大写标题段
+  - 模糊断言：无数字的「显著」「大量」「革命性」
+  - 重复 n-gram（同段 3+ 次）
+- **与 B4 分工**：B4 = 断言 vs 来源；B5 = 文本腔调 vs 发布可读性
+- **定价**：0.05 USDT；可与 B4 组合叙事「Creator Ops 双闸门」
+- **远期 LLM（单独 gate）**：仅当单价 ≥ 成本×3 且 Leo 开 paid API gate；或 BYOK；**永不接 relay**
+
+---
+
+## 审核通过后 Runbook（Leo 一声「listing」）
+
+**前置**：Agent #3977 四服务审核通过；Leo 明确授权 `onchainos create`。
+
+```bash
+cd ~/Projects/agent-acceptance-gate
+bash scripts/okx-batch-listing-draft.sh   # 打印 6 条 validate/create 草稿
+# 逐条 review → onchainos agent validate-listing → create → activate
+bash scripts/okx-asp-self-call.sh       # 自调用留 tx 证据
+```
+
+| 序 | SKU | endpoint |
+|----|-----|----------|
+| 1 | Crypto Market Regime Radar | `/crypto-market-regime-radar` |
+| 2 | World Cup Upset Alert | `/world-cup-upset-alert` |
+| 3 | Token DD Verdict | `/token-dd-verdict` |
+| 4 | PM Trade Preflight | `/pm-trade-preflight` |
+| 5 | PM Event Readout | `/pm-event-readout` |
+| 6 | Content Verify Claims | `/content-verify-claims` |
+
+**+48h**：录 demo v2 → v18 推（publish gate）→ #Okxai 参赛帖 → 填表（截止 7/17 08:00 北京）。
+
+文案 SSOT：`research/2026-07-07-okx-listing-copy-bilingual.md` · 代码：`worker/service-catalog.mjs` → `PENDING_OKX_LISTING_COPY`。
 
 ---
 
@@ -187,3 +233,6 @@ Leo Labs (#3977) @ api.leolabs.me
 |------|------|
 | 2026-07-07 | 初版：Phase 1 Wave A/B/C + Phase 2 素材库 + Hackathon 映射 + B1–B5 规格摘要 |
 | 2026-07-07 | **B1/B2 已实现**（Worker `live_unlisted`）：`/token-dd-verdict` · `/pm-trade-preflight`；**deployed** api.leolabs.me `23d6ea4c` |
+| 2026-07-07 | **B5 改规格**：Humanize+GLM → **Content Slop Check** 规则版；ASP 不调 relay；加审核通过后 batch listing runbook |
+| 2026-07-07 | **审核等待 checkpoint**：watcher `new=0`；8/8 GET sample 200；demo 三主角 GET 高亮 OK；`npm test` 全绿；v18+参赛帖草稿落盘 |
+| 2026-07-09 | **头像再拒**（圆角/白底）+ `[U1] beta`；策略改为再拒时 **Big Pack**。Leo 定稿头像=`content/brand/leo-labs-avatar-1024.jpg`。runbook+print脚本+Batch2 brief 就绪；**审核中不上链**。预检：禁词0 + 10×402 |
