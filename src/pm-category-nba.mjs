@@ -123,12 +123,14 @@ export function extractNbaFixture(input = {}, options = {}) {
       ? input.nfl
       : (input.ufc && typeof input.ufc === 'object'
         ? input.ufc
-        : (input.basketball && typeof input.basketball === 'object'
-          ? input.basketball
-          : (input.fixture && typeof input.fixture === 'object' ? input.fixture : null))));
+        : (input.mlb && typeof input.mlb === 'object'
+          ? input.mlb
+          : (input.basketball && typeof input.basketball === 'object'
+            ? input.basketball
+            : (input.fixture && typeof input.fixture === 'object' ? input.fixture : null)))));
   if (!raw) return null;
   const competition = raw.competition
-    ?? (input.ufc ? 'UFC' : (input.nfl ? 'NFL' : 'NBA'));
+    ?? (input.ufc ? 'UFC' : (input.mlb ? 'MLB' : (input.nfl ? 'NFL' : 'NBA')));
   return {
     scheduled_time_utc: raw.scheduled_time_utc ?? raw.tipoff_utc ?? raw.kickoff_utc ?? raw.start_time ?? null,
     fixture_sources: Array.isArray(raw.fixture_sources) ? raw.fixture_sources : (raw.fixture_sources ? [raw.fixture_sources] : []),

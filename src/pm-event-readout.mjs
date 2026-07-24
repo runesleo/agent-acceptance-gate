@@ -133,6 +133,9 @@ export async function assessPmEventReadoutLive(input = {}, options = {}) {
       ...(categoryPlugin.category_depth === 'enriched' && categoryPlugin.category === 'ufc'
         ? ['UFC/MMA plugin applied (fight moneyline-focused matrix via US-sports L1). Not a buy tip.']
         : []),
+      ...(categoryPlugin.category_depth === 'enriched' && categoryPlugin.category === 'mlb'
+        ? ['MLB plugin applied (ML/spread/totals matrix via US-sports L1). Not a buy tip.']
+        : []),
       ...(categoryPlugin.category_depth === 'enriched' && categoryPlugin.category === 'politics'
         ? ['Politics plugin applied: candidate yes-mass leaderboard + exclusivity sanity. Not a buy tip.']
         : []),
@@ -206,14 +209,14 @@ function maybeApplyCategoryPlugin({
       category_plugin: plugin
     };
   }
-  if (readout.category === 'nba' || readout.category === 'nfl' || readout.category === 'ufc') {
+  if (readout.category === 'nba' || readout.category === 'nfl' || readout.category === 'ufc' || readout.category === 'mlb') {
     const plugin = enrichNbaCategory({
       market,
       eventBundle,
       eventMatrix: readout.event_matrix,
       fixture: nbaFixture
     });
-    if (readout.category === 'nfl' || readout.category === 'ufc') {
+    if (readout.category === 'nfl' || readout.category === 'ufc' || readout.category === 'mlb') {
       plugin.category = readout.category;
       plugin.skill_alignment = {
         ...(plugin.skill_alignment || {}),
@@ -294,7 +297,7 @@ export function buildPmEventReadoutFallback(input = {}) {
     market_fixture_match: 'unknown',
     category: 'generic',
     category_depth: 'core_only',
-    plugins_available: ['football', 'tennis', 'nba', 'nfl', 'ufc', 'politics', 'weather', 'musk'],
+    plugins_available: ['football', 'tennis', 'nba', 'nfl', 'ufc', 'mlb', 'politics', 'weather', 'musk'],
     sources_read: ['static_fallback'],
     base_case: 'Demo readout only.',
     key_uncertainties: ['live_data_unavailable'],
@@ -375,7 +378,7 @@ function buildEventReadout(market, eventBundle, externalAnchors) {
     market_fixture_match: eventSlug ? 'ok' : 'single_market_no_parent_event',
     category,
     category_depth: 'core_only',
-    plugins_available: ['football', 'tennis', 'nba', 'nfl', 'ufc', 'politics', 'weather', 'musk'],
+    plugins_available: ['football', 'tennis', 'nba', 'nfl', 'ufc', 'mlb', 'politics', 'weather', 'musk'],
     sources_read: sources,
     base_case: primaryPrice !== null
       ? `Market prices "${primaryOutcome}" at ${round2(primaryPrice)} (${Math.round(primaryPrice * 100)}% implied).`
@@ -638,7 +641,8 @@ function detectCategory(market, eventBundle) {
   if (/\bnba\b|basketball|wnba/.test(blob)) return 'nba';
   if (/\bnfl\b|super bowl|american football/.test(blob)) return 'nfl';
   if (/\bufc\b|\bmma\b|bellator|fight night/.test(blob)) return 'ufc';
-  if (/football|soccer|fifa|fifwc|world.?cup|premier league|uefa|epl|ucl|la liga|serie a|bundesliga|mls/.test(blob)) {
+  if (/\bmlb\b|baseball|world series/.test(blob)) return 'mlb';
+  if (/football|soccer|fifa|fifwc|world.?cup|premier league|uefa|epl|ucl|la liga|serie a|bundesliga|mls\b/.test(blob)) {
     return 'football';
   }
   if (/temperature|weather|°f|°c|high temp/.test(blob)) return 'weather';
