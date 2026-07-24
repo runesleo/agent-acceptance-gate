@@ -117,8 +117,10 @@ export async function assessEventPriceDivergenceLive(input = {}, options = {}) {
     }
   };
 
+  const summary = buildSummary(top, assetReadouts);
+
   return {
-    schema_version: '0.2',
+    schema_version: '0.3',
     service_id: SERVICE_ID,
     mode: 'live',
     generated_at: new Date().toISOString(),
@@ -127,7 +129,8 @@ export async function assessEventPriceDivergenceLive(input = {}, options = {}) {
       assets_scanned: assetKeys,
       limit
     },
-    summary: buildSummary(top, assetReadouts),
+    summary,
+    buyer_summary_zh: buildDivergenceBuyerSummaryZh(top, assetReadouts, source_status),
     signals: top,
     assets: assetReadouts,
     caveats,
@@ -243,6 +246,16 @@ function buildSummary(signals, assetReadouts) {
   }
   const top = signals[0];
   return `${signals.length} divergence signal${signals.length === 1 ? '' : 's'} found across ${scanned}. Top: ${top.direction} on "${top.market_title}" (${top.asset}).`;
+}
+
+function buildDivergenceBuyerSummaryZh(signals, assetReadouts, sourceStatus) {
+  const scanned = assetReadouts.map((a) => a.asset).join('/') || '指定资产';
+  const health = sourceStatus?.overall || 'unknown';
+  if (!signals.length) {
+    return `未发现超阈值背离（扫描 ${scanned}；数据健康 ${health}）。启发式信号，非交易建议。`;
+  }
+  const top = signals[0];
+  return `发现 ${signals.length} 条背离；最强：${top.asset}「${top.market_title}」→ ${top.direction}（置信 ${top.confidence}）。数据健康 ${health}；非交易建议。`;
 }
 
 function resolveAssetKeys(assetInput) {

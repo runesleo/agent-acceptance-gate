@@ -165,6 +165,14 @@ export async function assessTokenDdVerdictLive(input = {}, options = {}) {
     verdict_bucket = 'research_position';
   }
 
+  const dex_scan = dexContext
+    ? {
+        pairs_found: dexContext.pairs.length,
+        top_pair: dexContext.pairs[0] ?? null,
+        venue_depth_cap_usd: dexContext.pairs[0]?.liquidity_usd ?? null
+      }
+    : null;
+
   return {
     schema_version: '0.2',
     service_id: SERVICE_ID,
@@ -179,18 +187,13 @@ export async function assessTokenDdVerdictLive(input = {}, options = {}) {
     },
     verdict_bucket,
     score_0_100: score,
+    buyer_summary_zh: buildTokenBuyerSummaryZh(verdict_bucket, score, hardStops, dex_scan),
     pillars: pillarsToArray(pillars),
     hard_stops: hardStops,
     hard_veto_gaps: [...new Set(hardVetoGaps)],
     confidence_gaps: [...new Set(confidenceGaps)],
     reasons,
-    dex_scan: dexContext
-      ? {
-          pairs_found: dexContext.pairs.length,
-          top_pair: dexContext.pairs[0] ?? null,
-          venue_depth_cap_usd: dexContext.pairs[0]?.liquidity_usd ?? null
-        }
-      : null,
+    dex_scan,
     caveats: [...STANDARD_CAVEATS],
     next_gate: 'OKX_ASP_listing_changes_require_Leo_approval',
     source: {
@@ -384,4 +387,18 @@ function toNumber(value) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function buildTokenBuyerSummaryZh(bucket, score, hardStops, dexScan) {
+  const bucketZh = {
+    avoid: '避开',
+    watch_only: '只观望',
+    research_position: '可研究',
+    tiny_speculative: '极小仓试错',
+    conviction: '高信念（仍非建议）'
+  }[bucket] || bucket;
+  const stopBit = hardStops?.length ? `；硬停 ${hardStops.slice(0, 2).join(', ')}` : '';
+  const liq = dexScan?.venue_depth_cap_usd;
+  const liqBit = liq != null ? `；顶池流动性约 $${Math.round(liq).toLocaleString('en-US')}` : '';
+  return `分桶 ${bucketZh}，分数 ${score}/100${stopBit}${liqBit}。Standard-lite 规则闸门，非审计/非投资建议。`;
 }

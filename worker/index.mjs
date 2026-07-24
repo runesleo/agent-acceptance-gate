@@ -471,11 +471,13 @@ async function pmEventReadoutWithCache(payload) {
   const football = payload?.football && typeof payload.football === 'object' ? payload.football : null;
   const tennis = payload?.tennis && typeof payload.tennis === 'object' ? payload.tennis : null;
   const nba = payload?.nba && typeof payload.nba === 'object' ? payload.nba : null;
+  const nfl = payload?.nfl && typeof payload.nfl === 'object' ? payload.nfl : null;
   const musk = payload?.musk && typeof payload.musk === 'object' ? payload.musk : null;
   const optionKey = [
     football?.verified === true ? `fv:${football.market_fixture_match || 'yes'}` : 'fv:none',
     tennis?.verified === true ? `tv:${tennis.market_fixture_match || 'yes'}` : 'tv:none',
     nba?.verified === true ? `nv:${nba.market_fixture_match || 'yes'}` : 'nv:none',
+    nfl?.verified === true ? `nf:${nfl.market_fixture_match || 'yes'}` : 'nf:none',
     musk?.current_count != null ? `mc:${musk.current_count}` : 'mc:none'
   ].join('|');
 
