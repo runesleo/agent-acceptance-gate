@@ -271,6 +271,15 @@ export default {
               : 'disabled (unpaid POST returns 402; set X402_FREE_TRIAL=true to opt in)',
             sample_get: 'GET the same service path for a public sample payload.'
           },
+          fulfillment: {
+            model: 'edge_on_demand',
+            host: 'Cloudflare Worker at api.leolabs.me',
+            operator_always_online: false,
+            always_on_agent_required: false,
+            llm_api_key_required: false,
+            detail:
+              'Each paid POST is fulfilled synchronously by the Worker: verify x402 → fetch public data / run rules → return JSON. No seller laptop, no standing agent, no LLM key for listed SKUs.'
+          },
           services: [...listed, ...unlisted]
         });
       }

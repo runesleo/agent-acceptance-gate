@@ -86,6 +86,7 @@ export function auditDelivery(input) {
 
   return {
     schema_version: SCHEMA_VERSION,
+    service_id: 'agent_delivery_acceptance_audit',
     verdict,
     score,
     dimension_scores,
@@ -97,7 +98,14 @@ export function auditDelivery(input) {
     buyer_summary: buildBuyerSummary(input, verdict, flags, missing, risks),
     buyer_summary_zh: buildBuyerSummaryZh(input, verdict, flags, missing, risks),
     evaluator_notes: buildEvaluatorNotes(verdict, flags, criticalBreaches),
-    machine_flags: Array.from(flags).sort()
+    machine_flags: Array.from(flags).sort(),
+    value_loop: {
+      why_pay_again: 'Each delivery is a new artifact set; re-run on every submit before accept/pay.',
+      stale_after_minutes: null,
+      best_used_in: 'buyer_acceptance_gate_per_task',
+      paid_value_tier: 'A_repeat_workflow',
+      fulfillment: 'edge_on_demand_no_llm'
+    }
   };
 }
 

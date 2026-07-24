@@ -89,6 +89,13 @@ export function assessPublishReadiness(input = {}) {
     },
     action,
     buyer_summary_zh,
+    value_loop: {
+      why_pay_again: 'Each draft is different; re-run before every publish attempt.',
+      stale_after_minutes: null,
+      best_used_in: 'content_publish_gate_before_post',
+      paid_value_tier: 'A_repeat_workflow',
+      fulfillment: 'edge_on_demand_no_llm'
+    },
     blockers,
     edit_reasons,
     slop: {

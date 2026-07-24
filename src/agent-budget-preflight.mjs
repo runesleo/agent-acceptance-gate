@@ -126,6 +126,14 @@ function result({ input, action, reason, remaining_usdt, checks, amount_usdt = 0
     remaining_usdt,
     checks,
     input,
+    buyer_summary_zh: buildBudgetBuyerSummaryZh(action, reason, amount_usdt, remaining_usdt),
+    value_loop: {
+      why_pay_again: 'Budget state and offer change every call; re-run before each paid x402/API spend.',
+      stale_after_minutes: null,
+      best_used_in: 'agent_spend_gate_before_payment',
+      paid_value_tier: 'A_repeat_workflow',
+      fulfillment: 'edge_on_demand_no_llm'
+    },
     caveats: [...STANDARD_CAVEATS],
     next_gate: action === 'buy'
       ? 'Caller_may_proceed_to_x402_or_paid_API'
@@ -135,6 +143,16 @@ function result({ input, action, reason, remaining_usdt, checks, amount_usdt = 0
       oss_lineage: 'arc-budget-agent evaluateSpendDecision (generalized, no settle)'
     }
   };
+}
+
+function buildBudgetBuyerSummaryZh(action, reason, amount, remaining) {
+  const actionZh = {
+    buy: '可买（仅决策，不代付）',
+    skip_sufficient: '证据已够，建议跳过付费',
+    reject_budget: '预算不足/超单笔上限',
+    reject_policy: '策略拒绝'
+  }[action] || action;
+  return `预算闸门：${actionZh}（${reason}）。本次报价 ${amount} USDT，剩余额度约 ${remaining} USDT。不签名、不结算。`;
 }
 
 function echo(input, budgetCap, spent, held, maxPerCall, offer, allowlisted, evidenceSufficient) {

@@ -59,7 +59,11 @@ export async function assessPmDecisionCardLive(input = {}, options = {}) {
     why_pay_again: 'Market price, spread, volume and event matrix change; re-run before each order attempt.',
     stale_after_minutes: 5,
     best_used_in: 'agent_trading_loop_before_manual_or_automated_order',
-    not_a_subscription_to: 'price_alerts_or_auto_execution'
+    not_a_subscription_to: 'price_alerts_or_auto_execution',
+    paid_value_tier: 'A_repeat_trading_loop',
+    fulfillment: 'edge_on_demand_no_llm',
+    operator_always_online: false,
+    llm_api_key_required: false
   };
 
   return {
@@ -79,6 +83,12 @@ export async function assessPmDecisionCardLive(input = {}, options = {}) {
     confidence: decision.confidence,
     buyer_summary_zh: decision.buyer_summary_zh,
     value_loop,
+    agent_loop: {
+      step_1: 'Call this card with market ref + side (+ size_usd)',
+      step_2: 'If skip → stop; if watch → shrink/wait; if eligible_for_manual_review → human risk check',
+      step_3: 'Only then place order elsewhere (this ASP never routes orders)',
+      step_4: 'Re-run if > stale_after_minutes or market moved'
+    },
     decision_card: {
       ...preflight.decision_card_lite,
       action: decision.action,
