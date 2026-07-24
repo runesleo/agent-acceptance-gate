@@ -62,6 +62,10 @@ import {
   assessFinanceCockpitLive,
   buildFinanceCockpitFallback
 } from '../src/finance-cockpit.mjs';
+import {
+  assessSportsCockpitLive,
+  buildSportsCockpitFallback
+} from '../src/sports-cockpit.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
@@ -155,6 +159,10 @@ const PAID_RADAR_ROUTES = {
   '/finance-cockpit': {
     description: 'Finance Cockpit — composed crypto co-pilot: regime score + event-price divergence in one card. Data only.',
     load: (payload) => financeCockpitWithCache(payload)
+  },
+  '/sports-cockpit': {
+    description: 'Sports Cockpit — composed sports co-pilot: smart-money + upset alerts (+ wallet cohort) in one card. Data only.',
+    load: (payload) => sportsCockpitWithCache(payload)
   }
 };
 
@@ -432,6 +440,20 @@ async function financeCockpitWithCache(payload) {
   });
 }
 
+async function sportsCockpitWithCache(payload) {
+  const sport = String(payload?.sport ?? 'all').trim().toLowerCase();
+  const league = String(payload?.league ?? '').trim().toLowerCase();
+  const query = String(payload?.query ?? payload?.market ?? 'all').trim().toLowerCase();
+  const maxProb = String(payload?.max_prob ?? payload?.max_implied_probability ?? '0.35');
+  const limit = Number.parseInt(payload?.limit, 10) || 5;
+
+  return radarWithCache({
+    cacheKey: `sports-cockpit|${sport}|${league}|${query}|${maxProb}|${limit}`,
+    loadLive: () => assessSportsCockpitLive(payload),
+    loadFallback: () => buildSportsCockpitFallback(payload)
+  });
+}
+
 async function worldCupUpsetAlertWithCache(payload) {
   const market = String(payload?.market ?? payload?.market_id ?? payload?.query ?? 'all').trim().toLowerCase();
   const limit = Number.parseInt(payload?.limit, 10) || 5;
@@ -701,6 +723,8 @@ function samplePayloadForPath(pathname) {
       };
     case '/finance-cockpit':
       return { focus: 'bitcoin', limit: 2 };
+    case '/sports-cockpit':
+      return { sport: 'football', league: 'epl', limit: 2 };
     default:
       return { limit: 2 };
   }

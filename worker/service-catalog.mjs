@@ -19,7 +19,8 @@ export const LISTED_SERVICE_PATHS = new Set([
   '/agent-budget-preflight',
   '/pm-brier',
   '/publish-readiness',
-  '/finance-cockpit'
+  '/finance-cockpit',
+  '/sports-cockpit'
 ]);
 
 export const SERVICE_CATALOG = {
@@ -185,6 +186,15 @@ export const SERVICE_CATALOG = {
     fee_usdt: '0.15',
     fee_atomic: '150000',
     mode: 'live'
+  },
+  '/sports-cockpit': {
+    service_id: 'sports_cockpit',
+    okx_service_id: 36671,
+    title: 'Sports Cockpit',
+    category: 'sports',
+    fee_usdt: '0.15',
+    fee_atomic: '150000',
+    mode: 'live'
   }
 };
 
@@ -305,6 +315,12 @@ export const OKX_LISTING_COPY = {
     serviceDescription:
       'Composed crypto co-pilot card: market regime score + event-price divergence signals in one JSON response. Data only.\n'
       + '金融副驾驶组合卡：市场状态分 + 事件概率/现货背离。输入 focus/asset + limit；不下单。'
+  },
+  36671: {
+    serviceName: 'Sports Cockpit',
+    serviceDescription:
+      'Composed sports co-pilot card: smart-money signals + upset alerts (+ cross-market wallet cohort) in one JSON response. Data only.\n'
+      + '体育副驾驶组合卡：聪明钱 + 冷门预警（含跨场钱包）。输入 sport/league/query + 可选 max_prob；非投注建议。'
   }
 };
 
@@ -357,6 +373,12 @@ export const PENDING_OKX_LISTING_COPY = {
     serviceDescription:
       'Composed crypto co-pilot card: market regime score + event-price divergence signals in one JSON response. Data only.\n'
       + '金融副驾驶组合卡：市场状态分 + 事件概率/现货背离。输入 focus/asset + limit；不下单。'
+  },
+  sports_cockpit: {
+    serviceName: 'Sports Cockpit',
+    serviceDescription:
+      'Composed sports co-pilot card: smart-money signals + upset alerts (+ cross-market wallet cohort) in one JSON response. Data only.\n'
+      + '体育副驾驶组合卡：聪明钱 + 冷门预警（含跨场钱包）。输入 sport/league/query + 可选 max_prob；非投注建议。'
   },
   crypto_market_regime_radar: OKX_LISTING_COPY[30211],
   world_cup_upset_alert: OKX_LISTING_COPY[30212],
