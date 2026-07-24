@@ -916,6 +916,46 @@ const BASE = 'https://gate.example.com';
   assert.ok(sm.schema_version === '0.3');
 }
 
+// ---- unit: nba category plugin ---------------------------------------------
+
+{
+  const { enrichNbaCategory, classifyNbaGroup } = await import('../src/pm-category-nba.mjs');
+  assert.equal(classifyNbaGroup({
+    sports_market_type: 'moneyline',
+    group_item_title: 'Lakers',
+    title: 'Lakers vs Celtics',
+    yes: 0.58
+  }), 'moneyline');
+  assert.equal(classifyNbaGroup({
+    sports_market_type: 'spreads',
+    group_item_title: 'Lakers -4.5',
+    title: 'Spread',
+    yes: 0.51
+  }), 'spreads_ladder');
+
+  const plugin = enrichNbaCategory({
+    market: { title: 'NBA: Lakers vs Celtics', slug: 'nba-lal-bos', yes: 0.58 },
+    eventBundle: { title: 'Lakers vs Celtics', slug: 'nba-lal-bos-2026' },
+    eventMatrix: [
+      { title: 'Lakers', group_item_title: 'Lakers', slug: 'lal', yes: 0.58, sports_market_type: 'moneyline', is_primary: true },
+      { title: 'Celtics', group_item_title: 'Celtics', slug: 'bos', yes: 0.42, sports_market_type: 'moneyline' },
+      { title: 'Spread', group_item_title: 'Lakers -4.5', slug: 'spread', yes: 0.5, sports_market_type: 'spreads' },
+      { title: 'Total', group_item_title: 'O/U 224.5', slug: 'total', yes: 0.52, sports_market_type: 'totals' }
+    ],
+    fixture: {
+      verified: true,
+      market_fixture_match: 'yes',
+      scheduled_time_utc: '2026-07-24T01:00:00Z',
+      home_team: 'Lakers',
+      away_team: 'Celtics'
+    }
+  });
+  assert.equal(plugin.category, 'nba');
+  assert.equal(plugin.matrix_status, 'complete');
+  assert.equal(plugin.fixture.fixture_status, 'ok');
+  assert.ok(plugin.coherence?.coherence_status);
+}
+
 // ---- unit: publish-readiness ------------------------------------------------
 
 {

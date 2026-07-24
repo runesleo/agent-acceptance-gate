@@ -100,9 +100,10 @@ export async function assessCryptoMarketRegimeLive(input = {}, options = {}) {
   const confidence = scoreConfidence(score, scoredDimensions, dimensions.length);
   const watchItems = buildWatchItems(readouts, scoredDimensions).slice(0, limit);
   const source_status = buildRegimeSourceStatus(assets, dimensions);
+  const oi_context = buildOiContext(readouts);
 
   return {
-    schema_version: '0.2',
+    schema_version: '0.3',
     service_id: SERVICE_ID,
     mode: 'live',
     generated_at: new Date().toISOString(),
@@ -116,9 +117,11 @@ export async function assessCryptoMarketRegimeLive(input = {}, options = {}) {
     score,
     confidence,
     summary: buildSummary(regime, score, assetKeys),
+    buyer_summary_zh: buildBuyerSummaryZh(regime, score, confidence, oi_context),
     dimensions,
     rationale: buildRationale(dimensions, score, regime),
     assets: readouts,
+    oi_context,
     watch_items: watchItems,
     caveats,
     next_gate: 'OKX_ASP_listing_changes_require_Leo_approval',
@@ -378,6 +381,41 @@ function buildRationale(dimensions, score, regime) {
 
 function buildSummary(regime, score, assetKeys) {
   return `Crypto market regime: ${regime} (score ${score}/100) across ${assetKeys.join(', ')}.`;
+}
+
+function buildOiContext(readouts) {
+  const rows = readouts
+    .filter((r) => r.open_interest_usd != null)
+    .map((r) => ({
+      asset: r.asset,
+      open_interest_usd: r.open_interest_usd,
+      funding_rate: r.funding_rate,
+      note: r.funding_rate != null && Math.abs(r.funding_rate) >= 0.0005
+        ? 'elevated_funding_with_oi_snapshot'
+        : 'oi_snapshot_only'
+    }));
+  const total = rows.reduce((sum, r) => sum + (r.open_interest_usd || 0), 0);
+  return {
+    role: 'context_only_not_scored',
+    assets: rows,
+    total_open_interest_usd: total || null,
+    interpretation: rows.length
+      ? 'OI is a leverage backlog snapshot; direction comes from spot/funding/premium/PM dimensions, not from OI alone.'
+      : 'OI unavailable from OKX public open-interest endpoint for scanned assets.'
+  };
+}
+
+function buildBuyerSummaryZh(regime, score, confidence, oiContext) {
+  const regimeZh = {
+    risk_on: '偏多/风险偏好',
+    risk_off: '偏空/避险',
+    neutral: '中性',
+    mixed: '信号打架'
+  }[regime] || regime;
+  const oiBit = oiContext?.total_open_interest_usd
+    ? `；OI 快照合计约 $${Math.round(oiContext.total_open_interest_usd).toLocaleString('en-US')}（仅上下文，不计入分数）`
+    : '；OI 暂缺';
+  return `市场状态 ${regimeZh}，分数 ${score}/100，置信 ${confidence}${oiBit}。解释见 dimensions/rationale；非交易建议。`;
 }
 
 function buildWatchItems(readouts, scoredDimensions) {
