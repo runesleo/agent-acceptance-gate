@@ -90,12 +90,19 @@
 
 ---
 
+## 无人付费杀线（已写入暂时结论 · 硬纪律）
+
+详见 `research/2026-07-24-temporary-conclusion-wtp-and-kill-line.md`：
+
+- 过审后 2 周 ≈0 付费 → 只改分发，不加深功能  
+- 过审后 4 周仍无复购 → **维护模式**（撤注意力）  
+- 再 4–8 周仍无 → 期权到期  
+
+短期最后一搏物料：`research/2026-07-24-short-term-last-push.md`
+
+---
+
 ## 需要你拍板的一件事（只问这个）
 
-**Demo 主画面选哪条？**（三选一或你指定）
-
-- A：`pm-decision-card`  
-- B：`finance-cockpit` / smart-money 信号  
-- C：`publish-readiness` / `delivery-audit`  
-
-你回 A/B/C 后，我把录屏卡收成单页，简介文案也可一并出（仍等你「改简介/上」再动 listing）。
+**Demo 主画面**默认已按「市场更有人付信号」选 **B（finance-cockpit）**；决策卡作彩蛋。  
+若要改回 A/C，说一声即可。

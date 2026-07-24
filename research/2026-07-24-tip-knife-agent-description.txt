@@ -1,0 +1,2 @@
+Pay-per-call data gates for agents: live PM/crypto signals that go stale, pre-trade decision cards, and delivery/publish checks. JSON in, structured verdict out — not a chatbot, not trade tips.
+给 Agent 的按次付费数据闸：会过期的预测市场/加密信号、下单前决策卡、交付与发布检查。JSON 进、结构化结论出；非聊天、非喊单。
