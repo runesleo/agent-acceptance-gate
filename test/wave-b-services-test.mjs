@@ -956,6 +956,24 @@ const BASE = 'https://gate.example.com';
   assert.ok(plugin.coherence?.coherence_status);
 }
 
+// ---- unit: politics category plugin ----------------------------------------
+
+{
+  const { enrichPoliticsCategory } = await import('../src/pm-category-politics.mjs');
+  const politics = enrichPoliticsCategory({
+    market: { title: 'Presidential Election Winner', slug: 'pres-2028', yes: 0.41 },
+    eventBundle: { title: '2028 Presidential Election', slug: 'pres-2028' },
+    eventMatrix: [
+      { title: 'Candidate A', group_item_title: 'A', slug: 'a', yes: 0.41, is_primary: true },
+      { title: 'Candidate B', group_item_title: 'B', slug: 'b', yes: 0.33 },
+      { title: 'Candidate C', group_item_title: 'C', slug: 'c', yes: 0.12 }
+    ]
+  });
+  assert.equal(politics.category, 'politics');
+  assert.equal(politics.ladder_status, 'multi_candidate');
+  assert.equal(politics.leaderboard[0].label, 'A');
+}
+
 // ---- unit: publish-readiness ------------------------------------------------
 
 {
