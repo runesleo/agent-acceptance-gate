@@ -956,6 +956,60 @@ const BASE = 'https://gate.example.com';
   assert.ok(plugin.coherence?.coherence_status);
 }
 
+// ---- unit: finance-cockpit -------------------------------------------------
+
+{
+  const { assessFinanceCockpitLive } = await import('../src/finance-cockpit.mjs');
+  const mockFc = async (url) => {
+    const u = String(url);
+    if (u.includes('okx.com') && u.includes('ticker')) {
+      return new Response(JSON.stringify({
+        code: '0',
+        data: [{ last: '65000', open24h: '64000' }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('okx.com') && u.includes('funding-rate')) {
+      return new Response(JSON.stringify({
+        code: '0',
+        data: [{ fundingRate: '0.0001', premium: '0.0002' }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('okx.com') && u.includes('open-interest')) {
+      return new Response(JSON.stringify({
+        code: '0',
+        data: [{ oiUsd: '1000000' }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('gamma-api.polymarket.com')) {
+      return new Response(JSON.stringify({
+        events: [{
+          closed: false,
+          markets: [{
+            conditionId: '0x1',
+            question: 'Will Bitcoin reach $100k?',
+            slug: 'btc-100k',
+            outcomes: '["Yes","No"]',
+            outcomePrices: '["0.4","0.6"]',
+            oneDayPriceChange: -0.05,
+            volume24hr: 20000,
+            active: true,
+            closed: false
+          }]
+        }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+  const card = await assessFinanceCockpitLive(
+    { focus: 'bitcoin', limit: 2 },
+    { fetchImpl: mockFc }
+  );
+  assert.equal(card.service_id, 'finance_cockpit');
+  assert.ok(card.regime?.regime);
+  assert.ok(typeof card.buyer_summary_zh === 'string');
+  assert.ok(['risk_on_clean', 'risk_off_clean', 'divergence_review', 'hold_observe'].includes(card.action));
+}
+
 // ---- unit: politics category plugin ----------------------------------------
 
 {

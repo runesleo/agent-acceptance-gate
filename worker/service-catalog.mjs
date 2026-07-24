@@ -18,7 +18,8 @@ export const LISTED_SERVICE_PATHS = new Set([
   '/content-slop-check',
   '/agent-budget-preflight',
   '/pm-brier',
-  '/publish-readiness'
+  '/publish-readiness',
+  '/finance-cockpit'
 ]);
 
 export const SERVICE_CATALOG = {
@@ -175,6 +176,15 @@ export const SERVICE_CATALOG = {
     fee_usdt: '0.1',
     fee_atomic: '100000',
     mode: 'live'
+  },
+  '/finance-cockpit': {
+    service_id: 'finance_cockpit',
+    okx_service_id: 36670,
+    title: 'Finance Cockpit',
+    category: 'finance',
+    fee_usdt: '0.15',
+    fee_atomic: '150000',
+    mode: 'live'
   }
 };
 
@@ -239,8 +249,8 @@ export const OKX_LISTING_COPY = {
   30215: {
     serviceName: 'PM Event Readout',
     serviceDescription:
-      'Football-ready event evidence card: same-event market matrix, fixture-aware tradability, and category depth when available. Not a buy tip.\n'
-      + '预测市场事件解读卡（Football-ready）：同场矩阵、赛程/fixture 可交易性，足球/网球品类深度可选。输入 market_url 或 slug；不下单。'
+      'Sports-ready event evidence card: same-event market matrix, fixture-aware tradability, football/tennis/NBA/weather/Musk plugins. Not a buy tip.\n'
+      + '预测市场事件解读卡：同场矩阵、赛程可交易性；足球/网球/NBA/天气等品类深度。输入 market_url 或 slug；不下单。'
   },
   30216: {
     serviceName: 'Content Verify Claims',
@@ -257,8 +267,8 @@ export const OKX_LISTING_COPY = {
   36662: {
     serviceName: 'Sports Upset Alert',
     serviceDescription:
-      'Flags profitable wallets entering low-probability sports outcomes across competitions; data only.\n'
-      + '体育冷门预警：盈利钱包买低概率侧。输入 sport/league/query + 可选 max_prob；非投注建议。'
+      'Flags profitable wallets entering low-probability sports outcomes; optional max_prob threshold; data only.\n'
+      + '体育冷门预警：盈利钱包买低概率侧。输入 sport/league/query + 可选 max_prob(0.05-0.5)；非投注建议。'
   },
   36663: {
     serviceName: 'PM Profile',
@@ -289,6 +299,12 @@ export const OKX_LISTING_COPY = {
     serviceDescription:
       'Pre-publish gate combining slop detection + claim/source overlap; returns ready / edit_first / block with Chinese buyer summary.\n'
       + '发布就绪闸门：注水检测 + 断言核查 → ready/先改/别发。输入 text + 可选 claims[]/sources[]；不改写、不发帖。'
+  },
+  36670: {
+    serviceName: 'Finance Cockpit',
+    serviceDescription:
+      'Composed crypto co-pilot card: market regime score + event-price divergence signals in one JSON response. Data only.\n'
+      + '金融副驾驶组合卡：市场状态分 + 事件概率/现货背离。输入 focus/asset + limit；不下单。'
   }
 };
 
@@ -335,6 +351,12 @@ export const PENDING_OKX_LISTING_COPY = {
     serviceDescription:
       'Pre-publish gate combining slop detection + claim/source overlap; returns ready / edit_first / block with Chinese buyer summary.\n'
       + '发布就绪闸门：注水检测 + 断言核查 → ready/先改/别发。输入 text + 可选 claims[]/sources[]；不改写、不发帖。'
+  },
+  finance_cockpit: {
+    serviceName: 'Finance Cockpit',
+    serviceDescription:
+      'Composed crypto co-pilot card: market regime score + event-price divergence signals in one JSON response. Data only.\n'
+      + '金融副驾驶组合卡：市场状态分 + 事件概率/现货背离。输入 focus/asset + limit；不下单。'
   },
   crypto_market_regime_radar: OKX_LISTING_COPY[30211],
   world_cup_upset_alert: OKX_LISTING_COPY[30212],

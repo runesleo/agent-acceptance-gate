@@ -58,6 +58,10 @@ import {
   assessPublishReadiness,
   buildPublishReadinessFallback
 } from '../src/publish-readiness.mjs';
+import {
+  assessFinanceCockpitLive,
+  buildFinanceCockpitFallback
+} from '../src/finance-cockpit.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
@@ -147,6 +151,10 @@ const PAID_RADAR_ROUTES = {
   '/publish-readiness': {
     description: 'Publish Readiness — combines slop check + claim verify into ready / edit_first / block before publish. No rewrite, no post.',
     load: (payload) => runPublishReadiness(payload)
+  },
+  '/finance-cockpit': {
+    description: 'Finance Cockpit — composed crypto co-pilot: regime score + event-price divergence in one card. Data only.',
+    load: (payload) => financeCockpitWithCache(payload)
   }
 };
 
@@ -410,6 +418,17 @@ async function cryptoMarketRegimeWithCache(payload) {
     cacheKey: `regime|${focus}|${limit}`,
     loadLive: () => assessCryptoMarketRegimeLive(payload),
     loadFallback: () => buildCryptoMarketRegimeFallback(payload)
+  });
+}
+
+async function financeCockpitWithCache(payload) {
+  const focus = String(payload?.focus ?? payload?.asset ?? 'all').trim().toLowerCase();
+  const limit = Number.parseInt(payload?.limit, 10) || 5;
+
+  return radarWithCache({
+    cacheKey: `finance-cockpit|${focus}|${limit}`,
+    loadLive: () => assessFinanceCockpitLive(payload),
+    loadFallback: () => buildFinanceCockpitFallback(payload)
   });
 }
 
@@ -680,6 +699,8 @@ function samplePayloadForPath(pathname) {
         claims: ['Marketplace has 358 unique ASPs and 2982 cumulative soldCount.'],
         sources: [{ text: 'Marketplace scan on 2026-07-07 found 358 unique ASPs and 2982 cumulative soldCount.' }]
       };
+    case '/finance-cockpit':
+      return { focus: 'bitcoin', limit: 2 };
     default:
       return { limit: 2 };
   }
