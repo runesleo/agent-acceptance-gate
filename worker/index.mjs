@@ -28,6 +28,10 @@ import {
   buildPmProfileFallback
 } from '../src/pm-profile.mjs';
 import {
+  assessAgentBudgetPreflight,
+  buildAgentBudgetPreflightFallback
+} from '../src/agent-budget-preflight.mjs';
+import {
   assessTokenDdVerdictLive,
   buildTokenDdVerdictFallback
 } from '../src/token-dd-verdict.mjs';
@@ -98,6 +102,10 @@ const PAID_RADAR_ROUTES = {
   '/pm-profile': {
     description: 'PM Profile — read-only Polymarket wallet snapshot (7d LB PnL + positions sample). Productized from polymarket-toolkit.',
     load: (payload) => pmProfileWithCache(payload)
+  },
+  '/agent-budget-preflight': {
+    description: 'Agent Budget Preflight — deterministic buy/skip/reject gate before an agent pays for an API/x402 call. No wallet, no settle. From arc-budget-agent policy.',
+    load: (payload) => runAgentBudgetPreflight(payload)
   },
   '/agent-delivery-acceptance-audit': {
     description: 'Agent Delivery Audit Gate — audits an agent task delivery (evidence, validation, hard gates) and returns pass / needs_review / fail with a buyer summary.',
@@ -458,6 +466,15 @@ function runContentSlopCheck(payload) {
   }
 }
 
+function runAgentBudgetPreflight(payload) {
+  try {
+    return assessAgentBudgetPreflight(payload);
+  } catch (error) {
+    if (String(error?.message || error).includes('required')) throw error;
+    return buildAgentBudgetPreflightFallback(payload);
+  }
+}
+
 // ---- Agent Delivery Audit Gate ---------------------------------------------
 // Accepts either the full auditor schema ({task, delivery, context}) or the
 // compact buyer shape {task, delivery_summary, artifacts, validation,
@@ -572,6 +589,18 @@ function samplePayloadForPath(pathname) {
       return { sport: 'football', league: 'epl', limit: 2 };
     case '/pm-profile':
       return { address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a' };
+    case '/agent-budget-preflight':
+      return {
+        budget_cap_usdt: 1,
+        spent_usdt: 0.2,
+        max_per_call_usdt: 0.5,
+        evidence_sufficient: false,
+        offer: {
+          provider: 'leo-labs',
+          price_usdt: 0.1,
+          resource_url: 'https://api.leolabs.me/pm-profile'
+        }
+      };
     case '/crypto-market-regime-radar':
       return { focus: 'bitcoin', limit: 2 };
     case '/token-dd-verdict':

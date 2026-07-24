@@ -15,7 +15,8 @@ export const LISTED_SERVICE_PATHS = new Set([
   '/sports-smart-money-radar',
   '/sports-upset-alert',
   '/pm-profile',
-  '/content-slop-check'
+  '/content-slop-check',
+  '/agent-budget-preflight'
 ]);
 
 export const SERVICE_CATALOG = {
@@ -145,6 +146,15 @@ export const SERVICE_CATALOG = {
     fee_usdt: '0.05',
     fee_atomic: '50000',
     mode: 'live'
+  },
+  '/agent-budget-preflight': {
+    service_id: 'agent_budget_preflight',
+    okx_service_id: 36666,
+    title: 'Agent Budget Preflight',
+    category: 'agent_ops',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live'
   }
 };
 
@@ -245,6 +255,12 @@ export const PENDING_OKX_LISTING_COPY = {
     serviceDescription:
       'Read-only Polymarket wallet snapshot: 7d leaderboard PnL + open positions sample. From public APIs / polymarket-toolkit lineage.\n'
       + 'Polymarket 钱包画像：7日榜 PnL + 持仓抽样。输入 address 或 username；只读不下单。'
+  },
+  agent_budget_preflight: {
+    serviceName: 'Agent Budget Preflight',
+    serviceDescription:
+      'Deterministic spend gate before an agent pays for an API/x402 call: buy / skip_sufficient / reject with reasons. No wallet, no settle.\n'
+      + 'Agent 付费调用前预算闸门：输出 buy/跳过/拒绝及原因。输入 budget_cap_usdt + offer.price_usdt；不签名、不结算。'
   },
   crypto_market_regime_radar: OKX_LISTING_COPY[30211],
   world_cup_upset_alert: OKX_LISTING_COPY[30212],

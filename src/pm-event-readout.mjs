@@ -14,6 +14,7 @@ import {
 import { enrichMuskCategory, extractMuskSnapshot } from './pm-category-musk.mjs';
 import { enrichFootballCategory, extractFootballFixture } from './pm-category-football.mjs';
 import { enrichTennisCategory, extractTennisFixture } from './pm-category-tennis.mjs';
+import { enrichWeatherCategory, extractWeatherSnapshot } from './pm-category-weather.mjs';
 
 const SERVICE_ID = 'pm_event_readout';
 const SCHEMA_VERSION = '0.2';
@@ -68,6 +69,7 @@ export async function assessPmEventReadoutLive(input = {}, options = {}) {
   const muskSnapshot = extractMuskSnapshot(input, options);
   const footballFixture = extractFootballFixture(input, options);
   const tennisFixture = extractTennisFixture(input, options);
+  const weatherSnapshot = extractWeatherSnapshot(input, options);
   const categoryPlugin = maybeApplyCategoryPlugin({
     readout,
     market,
@@ -75,6 +77,7 @@ export async function assessPmEventReadoutLive(input = {}, options = {}) {
     muskSnapshot,
     footballFixture,
     tennisFixture,
+    weatherSnapshot,
     enrichCategory: input.enrich_category !== false && options.enrichCategory !== false
   });
 
@@ -143,6 +146,7 @@ function maybeApplyCategoryPlugin({
   muskSnapshot,
   footballFixture,
   tennisFixture,
+  weatherSnapshot,
   enrichCategory
 }) {
   if (!enrichCategory) {
@@ -181,6 +185,19 @@ function maybeApplyCategoryPlugin({
       matrix_status: plugin.matrix_status,
       missing_market_groups: plugin.missing_market_groups,
       related_market_count: plugin.related_market_count,
+      category_plugin: plugin
+    };
+  }
+  if (readout.category === 'weather') {
+    const plugin = enrichWeatherCategory({
+      market,
+      eventBundle,
+      eventMatrix: readout.event_matrix,
+      snapshot: weatherSnapshot
+    });
+    return {
+      category: plugin.category,
+      category_depth: plugin.category_depth,
       category_plugin: plugin
     };
   }
