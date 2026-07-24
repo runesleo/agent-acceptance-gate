@@ -81,6 +81,10 @@ import {
   buildNbaMatchCardFallback,
   samplePayloadForScenario
 } from '../src/pm-scenario-skus.mjs';
+import {
+  assessPmDecisionCardLive,
+  buildPmDecisionCardFallback
+} from '../src/pm-decision-card.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
@@ -202,6 +206,10 @@ const PAID_RADAR_ROUTES = {
   '/nba-match-card': {
     description: 'NBA Match Card — moneyline/spread/totals matrix. Pass query or slug.',
     load: (payload) => scenarioSkuWithCache('nba_match_card', payload)
+  },
+  '/pm-decision-card': {
+    description: 'PM Decision Card — preflight + optional event context → skip/watch/eligible_for_manual_review. Replay before each order. Not a buy tip.',
+    load: (payload) => pmDecisionCardWithCache(payload)
   }
 };
 
@@ -539,6 +547,26 @@ async function scenarioSkuWithCache(scenarioId, payload) {
   });
 }
 
+async function pmDecisionCardWithCache(payload) {
+  const ref = String(
+    payload?.condition_id
+    ?? payload?.slug
+    ?? payload?.market_url
+    ?? ''
+  ).trim().toLowerCase();
+  if (!ref) {
+    throw new Error('pm-decision-card requires market_url, condition_id, or slug.');
+  }
+  const side = String(payload?.side ?? 'yes').trim().toLowerCase();
+  const includeEvent = payload?.include_event_context === false ? '0' : '1';
+
+  return radarWithCache({
+    cacheKey: `decision-card|${ref}|${side}|${includeEvent}|${payload?.size_usd ?? ''}`,
+    loadLive: () => assessPmDecisionCardLive(payload),
+    loadFallback: () => buildPmDecisionCardFallback(payload)
+  });
+}
+
 async function worldCupUpsetAlertWithCache(payload) {
   const market = String(payload?.market ?? payload?.market_id ?? payload?.query ?? 'all').trim().toLowerCase();
   const limit = Number.parseInt(payload?.limit, 10) || 5;
@@ -822,6 +850,13 @@ function samplePayloadForPath(pathname) {
       return samplePayloadForScenario('tennis_match_card');
     case '/nba-match-card':
       return samplePayloadForScenario('nba_match_card');
+    case '/pm-decision-card':
+      return {
+        slug: 'will-argentina-win-the-2026-fifa-world-cup-245',
+        side: 'yes',
+        size_usd: 25,
+        include_event_context: true
+      };
     default:
       return { limit: 2 };
   }

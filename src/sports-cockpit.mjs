@@ -59,6 +59,12 @@ export async function assessSportsCockpitLive(input = {}, options = {}) {
     input: scope,
     action,
     buyer_summary_zh: buildBuyerSummaryZh(action, scope, signals, alerts, cohort),
+    value_loop: {
+      why_pay_again: 'Large trades and upset flow change continuously; re-scan before acting on sports PM.',
+      stale_after_minutes: 10,
+      best_used_in: 'sports_pm_watchlist_or_pretrade_scan',
+      paid_value_tier: 'A_repeat_monitoring'
+    },
     smart_money: {
       summary: smart.summary,
       signal_count: signals.length,

@@ -26,7 +26,8 @@ export const LISTED_SERVICE_PATHS = new Set([
   '/macro-fed-readout',
   '/football-match-card',
   '/tennis-match-card',
-  '/nba-match-card'
+  '/nba-match-card',
+  '/pm-decision-card'
 ]);
 
 export const SERVICE_CATALOG = {
@@ -255,6 +256,15 @@ export const SERVICE_CATALOG = {
     fee_usdt: '0.1',
     fee_atomic: '100000',
     mode: 'live'
+  },
+  '/pm-decision-card': {
+    service_id: 'pm_decision_card',
+    okx_service_id: 36681,
+    title: 'PM Decision Card',
+    category: 'finance',
+    fee_usdt: '0.15',
+    fee_atomic: '150000',
+    mode: 'live'
   }
 };
 
@@ -417,6 +427,12 @@ export const OKX_LISTING_COPY = {
     serviceDescription:
       'NBA match evidence card: moneyline/spread/totals matrix + heuristic coherence. Not a buy tip.\n'
       + 'NBA 比赛卡：胜负/让分/总分矩阵。输入 query/slug + 可选 nba{}；不下单。'
+  },
+  36681: {
+    serviceName: 'PM Decision Card',
+    serviceDescription:
+      'Pre-trade decision gate: preflight + optional event context → skip/watch/eligible_for_manual_review. Replay before each order. Not a buy tip.\n'
+      + '预测市场决策卡：下单前机械检查+事件上下文 → 跳过/观望/可人工复核。每次下单前重跑；非买点。'
   }
 };
 
@@ -511,6 +527,12 @@ export const PENDING_OKX_LISTING_COPY = {
     serviceDescription:
       'NBA match evidence card: moneyline/spread/totals matrix + heuristic coherence. Not a buy tip.\n'
       + 'NBA 比赛卡：胜负/让分/总分矩阵。输入 query/slug + 可选 nba{}；不下单。'
+  },
+  pm_decision_card: {
+    serviceName: 'PM Decision Card',
+    serviceDescription:
+      'Pre-trade decision gate: preflight + optional event context → skip/watch/eligible_for_manual_review. Replay before each order. Not a buy tip.\n'
+      + '预测市场决策卡：下单前机械检查+事件上下文 → 跳过/观望/可人工复核。每次下单前重跑；非买点。'
   },
   crypto_market_regime_radar: OKX_LISTING_COPY[30211],
   world_cup_upset_alert: OKX_LISTING_COPY[30212],

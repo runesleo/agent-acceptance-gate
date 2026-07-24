@@ -137,6 +137,9 @@ async function assessScenarioSkuLive(scenarioKey, input = {}, options = {}) {
       `Category mismatch: this SKU is for ${spec.zh_name}; detected "${category}". Results may be core_only — pick a matching market or use /pm-event-readout.`
     );
   }
+  caveats.push(
+    'Paid-value note: this is a scenario entry SKU over /pm-event-readout + category plugin — pay again when the event/market changes, not for a different wrapper of the same frozen card.'
+  );
 
   return {
     ...base,

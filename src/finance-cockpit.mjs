@@ -50,6 +50,12 @@ export async function assessFinanceCockpitLive(input = {}, options = {}) {
     input: { focus, limit },
     action,
     buyer_summary_zh,
+    value_loop: {
+      why_pay_again: 'Regime score and divergence signals refresh with live OKX/PM data; useful on a monitor cadence.',
+      stale_after_minutes: 15,
+      best_used_in: 'crypto_research_or_risk_dashboard_loop',
+      paid_value_tier: 'A_repeat_monitoring'
+    },
     regime: {
       regime: regime.regime,
       score: regime.score,

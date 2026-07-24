@@ -956,6 +956,56 @@ const BASE = 'https://gate.example.com';
   assert.ok(plugin.coherence?.coherence_status);
 }
 
+// ---- unit: pm-decision-card ------------------------------------------------
+
+{
+  const { assessPmDecisionCardLive } = await import('../src/pm-decision-card.mjs');
+  const mockDc = async (url) => {
+    const u = String(url);
+    if (u.includes('/markets?')) {
+      return new Response(JSON.stringify([{
+        conditionId: '0xdec',
+        slug: 'demo-decision',
+        question: 'Will demo happen?',
+        active: true,
+        closed: false,
+        volume24hr: 25000,
+        outcomes: '["Yes","No"]',
+        outcomePrices: '["0.42","0.58"]',
+        bestBid: 0.41,
+        bestAsk: 0.43,
+        events: [{ slug: 'demo-event', title: 'Demo event' }]
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/events')) {
+      return new Response(JSON.stringify([{
+        slug: 'demo-event',
+        title: 'Demo event',
+        closed: false,
+        markets: [{
+          conditionId: '0xdec',
+          slug: 'demo-decision',
+          question: 'Will demo happen?',
+          outcomes: '["Yes","No"]',
+          outcomePrices: '["0.42","0.58"]',
+          volume24hr: 25000,
+          active: true,
+          closed: false
+        }]
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+  const card = await assessPmDecisionCardLive(
+    { slug: 'demo-decision', side: 'yes', size_usd: 20 },
+    { fetchImpl: mockDc }
+  );
+  assert.equal(card.service_id, 'pm_decision_card');
+  assert.ok(['skip', 'watch', 'eligible_for_manual_review'].includes(card.action));
+  assert.ok(card.value_loop?.stale_after_minutes);
+  assert.ok(card.decision_card?.next_actions?.length >= 1);
+}
+
 // ---- unit: scenario SKUs ---------------------------------------------------
 
 {
