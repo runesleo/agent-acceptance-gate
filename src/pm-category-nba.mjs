@@ -121,17 +121,21 @@ export function extractNbaFixture(input = {}, options = {}) {
     ? input.nba
     : (input.nfl && typeof input.nfl === 'object'
       ? input.nfl
-      : (input.basketball && typeof input.basketball === 'object'
-        ? input.basketball
-        : (input.fixture && typeof input.fixture === 'object' ? input.fixture : null)));
+      : (input.ufc && typeof input.ufc === 'object'
+        ? input.ufc
+        : (input.basketball && typeof input.basketball === 'object'
+          ? input.basketball
+          : (input.fixture && typeof input.fixture === 'object' ? input.fixture : null))));
   if (!raw) return null;
+  const competition = raw.competition
+    ?? (input.ufc ? 'UFC' : (input.nfl ? 'NFL' : 'NBA'));
   return {
     scheduled_time_utc: raw.scheduled_time_utc ?? raw.tipoff_utc ?? raw.kickoff_utc ?? raw.start_time ?? null,
     fixture_sources: Array.isArray(raw.fixture_sources) ? raw.fixture_sources : (raw.fixture_sources ? [raw.fixture_sources] : []),
     market_fixture_match: raw.market_fixture_match ?? raw.match ?? null,
-    home_team: raw.home_team ?? raw.home ?? null,
-    away_team: raw.away_team ?? raw.away ?? null,
-    competition: raw.competition ?? (input.nfl ? 'NFL' : 'NBA'),
+    home_team: raw.home_team ?? raw.home ?? raw.fighter_a ?? null,
+    away_team: raw.away_team ?? raw.away ?? raw.fighter_b ?? null,
+    competition,
     verified: raw.verified === true
   };
 }
