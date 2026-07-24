@@ -20,7 +20,13 @@ export const LISTED_SERVICE_PATHS = new Set([
   '/pm-brier',
   '/publish-readiness',
   '/finance-cockpit',
-  '/sports-cockpit'
+  '/sports-cockpit',
+  '/weather-event-readout',
+  '/politics-event-readout',
+  '/macro-fed-readout',
+  '/football-match-card',
+  '/tennis-match-card',
+  '/nba-match-card'
 ]);
 
 export const SERVICE_CATALOG = {
@@ -195,6 +201,60 @@ export const SERVICE_CATALOG = {
     fee_usdt: '0.15',
     fee_atomic: '150000',
     mode: 'live'
+  },
+  '/weather-event-readout': {
+    service_id: 'weather_event_readout',
+    okx_service_id: 36675,
+    title: 'Weather Event Readout',
+    category: 'weather',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live'
+  },
+  '/politics-event-readout': {
+    service_id: 'politics_event_readout',
+    okx_service_id: 36676,
+    title: 'Politics Event Readout',
+    category: 'politics',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live'
+  },
+  '/macro-fed-readout': {
+    service_id: 'macro_fed_readout',
+    okx_service_id: 36677,
+    title: 'Macro Fed Readout',
+    category: 'macro',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live'
+  },
+  '/football-match-card': {
+    service_id: 'football_match_card',
+    okx_service_id: 36678,
+    title: 'Football Match Card',
+    category: 'sports',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live'
+  },
+  '/tennis-match-card': {
+    service_id: 'tennis_match_card',
+    okx_service_id: 36679,
+    title: 'Tennis Match Card',
+    category: 'sports',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live'
+  },
+  '/nba-match-card': {
+    service_id: 'nba_match_card',
+    okx_service_id: 36680,
+    title: 'NBA Match Card',
+    category: 'sports',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live'
   }
 };
 
@@ -321,6 +381,42 @@ export const OKX_LISTING_COPY = {
     serviceDescription:
       'Composed sports co-pilot card: smart-money signals + upset alerts (+ cross-market wallet cohort) in one JSON response. Data only.\n'
       + '体育副驾驶组合卡：聪明钱 + 冷门预警（含跨场钱包）。输入 sport/league/query + 可选 max_prob；非投注建议。'
+  },
+  36675: {
+    serviceName: 'Weather Event Readout',
+    serviceDescription:
+      'Temperature-ladder prediction-market card: bucket surface + optional caller forecast/obs snapshot. Data only.\n'
+      + '天气温度阶梯卡：桶分布 + 可选预报/实况快照。输入 query 或 slug + 可选 weather{}；不下单、不爬站。'
+  },
+  36676: {
+    serviceName: 'Politics Event Readout',
+    serviceDescription:
+      'Election/politics ladder card: candidate yes-mass leaderboard + exclusivity sanity. Data only.\n'
+      + '政治选举盘口卡：候选人 yes 质量排行 + 互斥性检查。输入 query 或 slug；不下单。'
+  },
+  36677: {
+    serviceName: 'Macro Fed Readout',
+    serviceDescription:
+      'Fed/FOMC rate-decision market card with honest external-anchor gaps. Data only.\n'
+      + '美联储利率宏观卡：FOMC/利率盘口矩阵；外部锚定缺口如实标注。输入 query 或 slug；不下单。'
+  },
+  36678: {
+    serviceName: 'Football Match Card',
+    serviceDescription:
+      'Football match evidence card: same-event matrix, fixture gate, expression comparison. Not a buy tip.\n'
+      + '足球比赛卡：同场矩阵、赛程闸门、表达比较。输入 query/slug + 可选 football{}；不下单。'
+  },
+  36679: {
+    serviceName: 'Tennis Match Card',
+    serviceDescription:
+      'Tennis match evidence card: format-aware ML/set handicap/totals + domination check. Not a buy tip.\n'
+      + '网球比赛卡：赛制感知的胜负/盘口/总局数。输入 query/slug + 可选 tennis{}；不下单。'
+  },
+  36680: {
+    serviceName: 'NBA Match Card',
+    serviceDescription:
+      'NBA match evidence card: moneyline/spread/totals matrix + heuristic coherence. Not a buy tip.\n'
+      + 'NBA 比赛卡：胜负/让分/总分矩阵。输入 query/slug + 可选 nba{}；不下单。'
   }
 };
 
@@ -379,6 +475,42 @@ export const PENDING_OKX_LISTING_COPY = {
     serviceDescription:
       'Composed sports co-pilot card: smart-money signals + upset alerts (+ cross-market wallet cohort) in one JSON response. Data only.\n'
       + '体育副驾驶组合卡：聪明钱 + 冷门预警（含跨场钱包）。输入 sport/league/query + 可选 max_prob；非投注建议。'
+  },
+  weather_event_readout: {
+    serviceName: 'Weather Event Readout',
+    serviceDescription:
+      'Temperature-ladder prediction-market card: bucket surface + optional caller forecast/obs snapshot. Data only.\n'
+      + '天气温度阶梯卡：桶分布 + 可选预报/实况快照。输入 query 或 slug + 可选 weather{}；不下单、不爬站。'
+  },
+  politics_event_readout: {
+    serviceName: 'Politics Event Readout',
+    serviceDescription:
+      'Election/politics ladder card: candidate yes-mass leaderboard + exclusivity sanity. Data only.\n'
+      + '政治选举盘口卡：候选人 yes 质量排行 + 互斥性检查。输入 query 或 slug；不下单。'
+  },
+  macro_fed_readout: {
+    serviceName: 'Macro Fed Readout',
+    serviceDescription:
+      'Fed/FOMC rate-decision market card with honest external-anchor gaps. Data only.\n'
+      + '美联储利率宏观卡：FOMC/利率盘口矩阵；外部锚定缺口如实标注。输入 query 或 slug；不下单。'
+  },
+  football_match_card: {
+    serviceName: 'Football Match Card',
+    serviceDescription:
+      'Football match evidence card: same-event matrix, fixture gate, expression comparison. Not a buy tip.\n'
+      + '足球比赛卡：同场矩阵、赛程闸门、表达比较。输入 query/slug + 可选 football{}；不下单。'
+  },
+  tennis_match_card: {
+    serviceName: 'Tennis Match Card',
+    serviceDescription:
+      'Tennis match evidence card: format-aware ML/set handicap/totals + domination check. Not a buy tip.\n'
+      + '网球比赛卡：赛制感知的胜负/盘口/总局数。输入 query/slug + 可选 tennis{}；不下单。'
+  },
+  nba_match_card: {
+    serviceName: 'NBA Match Card',
+    serviceDescription:
+      'NBA match evidence card: moneyline/spread/totals matrix + heuristic coherence. Not a buy tip.\n'
+      + 'NBA 比赛卡：胜负/让分/总分矩阵。输入 query/slug + 可选 nba{}；不下单。'
   },
   crypto_market_regime_radar: OKX_LISTING_COPY[30211],
   world_cup_upset_alert: OKX_LISTING_COPY[30212],

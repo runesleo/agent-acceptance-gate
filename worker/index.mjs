@@ -66,6 +66,21 @@ import {
   assessSportsCockpitLive,
   buildSportsCockpitFallback
 } from '../src/sports-cockpit.mjs';
+import {
+  assessWeatherEventReadoutLive,
+  buildWeatherEventReadoutFallback,
+  assessPoliticsEventReadoutLive,
+  buildPoliticsEventReadoutFallback,
+  assessMacroFedReadoutLive,
+  buildMacroFedReadoutFallback,
+  assessFootballMatchCardLive,
+  buildFootballMatchCardFallback,
+  assessTennisMatchCardLive,
+  buildTennisMatchCardFallback,
+  assessNbaMatchCardLive,
+  buildNbaMatchCardFallback,
+  samplePayloadForScenario
+} from '../src/pm-scenario-skus.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
@@ -163,6 +178,30 @@ const PAID_RADAR_ROUTES = {
   '/sports-cockpit': {
     description: 'Sports Cockpit — composed sports co-pilot: smart-money + upset alerts (+ wallet cohort) in one card. Data only.',
     load: (payload) => sportsCockpitWithCache(payload)
+  },
+  '/weather-event-readout': {
+    description: 'Weather Event Readout — temperature-ladder PM card + optional caller forecast/obs. Pass query or slug.',
+    load: (payload) => scenarioSkuWithCache('weather_event_readout', payload)
+  },
+  '/politics-event-readout': {
+    description: 'Politics Event Readout — election/politics yes-mass ladder card. Pass query or slug.',
+    load: (payload) => scenarioSkuWithCache('politics_event_readout', payload)
+  },
+  '/macro-fed-readout': {
+    description: 'Macro Fed Readout — Fed/FOMC rate-decision market card with honest anchor gaps. Pass query or slug.',
+    load: (payload) => scenarioSkuWithCache('macro_fed_readout', payload)
+  },
+  '/football-match-card': {
+    description: 'Football Match Card — same-event matrix + fixture gate + expression comparison. Pass query or slug.',
+    load: (payload) => scenarioSkuWithCache('football_match_card', payload)
+  },
+  '/tennis-match-card': {
+    description: 'Tennis Match Card — format-aware ML/set handicap/totals. Pass query or slug.',
+    load: (payload) => scenarioSkuWithCache('tennis_match_card', payload)
+  },
+  '/nba-match-card': {
+    description: 'NBA Match Card — moneyline/spread/totals matrix. Pass query or slug.',
+    load: (payload) => scenarioSkuWithCache('nba_match_card', payload)
   }
 };
 
@@ -454,6 +493,52 @@ async function sportsCockpitWithCache(payload) {
   });
 }
 
+const SCENARIO_LOADERS = {
+  weather_event_readout: {
+    live: assessWeatherEventReadoutLive,
+    fallback: buildWeatherEventReadoutFallback
+  },
+  politics_event_readout: {
+    live: assessPoliticsEventReadoutLive,
+    fallback: buildPoliticsEventReadoutFallback
+  },
+  macro_fed_readout: {
+    live: assessMacroFedReadoutLive,
+    fallback: buildMacroFedReadoutFallback
+  },
+  football_match_card: {
+    live: assessFootballMatchCardLive,
+    fallback: buildFootballMatchCardFallback
+  },
+  tennis_match_card: {
+    live: assessTennisMatchCardLive,
+    fallback: buildTennisMatchCardFallback
+  },
+  nba_match_card: {
+    live: assessNbaMatchCardLive,
+    fallback: buildNbaMatchCardFallback
+  }
+};
+
+async function scenarioSkuWithCache(scenarioId, payload) {
+  const loader = SCENARIO_LOADERS[scenarioId];
+  if (!loader) throw new Error(`Unknown scenario ${scenarioId}`);
+  const ref = String(
+    payload?.condition_id
+    ?? payload?.slug
+    ?? payload?.market_url
+    ?? payload?.query
+    ?? payload?.market
+    ?? 'default'
+  ).trim().toLowerCase();
+
+  return radarWithCache({
+    cacheKey: `scenario|${scenarioId}|${ref}`,
+    loadLive: () => loader.live(payload),
+    loadFallback: () => loader.fallback(payload)
+  });
+}
+
 async function worldCupUpsetAlertWithCache(payload) {
   const market = String(payload?.market ?? payload?.market_id ?? payload?.query ?? 'all').trim().toLowerCase();
   const limit = Number.parseInt(payload?.limit, 10) || 5;
@@ -725,6 +810,18 @@ function samplePayloadForPath(pathname) {
       return { focus: 'bitcoin', limit: 2 };
     case '/sports-cockpit':
       return { sport: 'football', league: 'epl', limit: 2 };
+    case '/weather-event-readout':
+      return samplePayloadForScenario('weather_event_readout');
+    case '/politics-event-readout':
+      return samplePayloadForScenario('politics_event_readout');
+    case '/macro-fed-readout':
+      return samplePayloadForScenario('macro_fed_readout');
+    case '/football-match-card':
+      return samplePayloadForScenario('football_match_card');
+    case '/tennis-match-card':
+      return samplePayloadForScenario('tennis_match_card');
+    case '/nba-match-card':
+      return samplePayloadForScenario('nba_match_card');
     default:
       return { limit: 2 };
   }

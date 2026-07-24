@@ -956,6 +956,92 @@ const BASE = 'https://gate.example.com';
   assert.ok(plugin.coherence?.coherence_status);
 }
 
+// ---- unit: scenario SKUs ---------------------------------------------------
+
+{
+  const {
+    assessPoliticsEventReadoutLive,
+    assessWeatherEventReadoutLive
+  } = await import('../src/pm-scenario-skus.mjs');
+
+  const mockSearch = async (url) => {
+    const u = String(url);
+    if (u.includes('public-search')) {
+      return new Response(JSON.stringify({
+        events: [{
+          title: '2028 Presidential Election',
+          slug: 'pres-2028',
+          closed: false,
+          volume24hr: 90000,
+          markets: [{
+            conditionId: '0xpol1',
+            slug: 'pres-2028-a',
+            question: 'Will Candidate A win the presidential election?',
+            outcomes: '["Yes","No"]',
+            outcomePrices: '["0.41","0.59"]',
+            volume24hr: 50000,
+            active: true,
+            closed: false
+          }]
+        }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/markets?slug=')) {
+      return new Response(JSON.stringify([{
+        conditionId: '0xpol1',
+        slug: 'pres-2028-a',
+        question: 'Will Candidate A win the presidential election?',
+        outcomes: '["Yes","No"]',
+        outcomePrices: '["0.41","0.59"]',
+        volume24hr: 50000,
+        active: true,
+        closed: false,
+        events: [{ slug: 'pres-2028', title: '2028 Presidential Election' }]
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/events?') || u.includes('/events/')) {
+      return new Response(JSON.stringify([{
+        slug: 'pres-2028',
+        title: '2028 Presidential Election',
+        closed: false,
+        markets: [{
+          conditionId: '0xpol1',
+          slug: 'pres-2028-a',
+          question: 'Will Candidate A win the presidential election?',
+          outcomes: '["Yes","No"]',
+          outcomePrices: '["0.41","0.59"]',
+          volume24hr: 50000,
+          active: true,
+          closed: false,
+          groupItemTitle: 'A'
+        }, {
+          conditionId: '0xpol2',
+          slug: 'pres-2028-b',
+          question: 'Will Candidate B win the presidential election?',
+          outcomes: '["Yes","No"]',
+          outcomePrices: '["0.33","0.67"]',
+          volume24hr: 40000,
+          active: true,
+          closed: false,
+          groupItemTitle: 'B'
+        }]
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+
+  const politics = await assessPoliticsEventReadoutLive(
+    { query: 'president' },
+    { fetchImpl: mockSearch }
+  );
+  assert.equal(politics.service_id, 'politics_event_readout');
+  assert.equal(politics.scenario?.id, 'politics_event_readout');
+  assert.ok(typeof politics.buyer_summary_zh === 'string');
+
+  const weatherFallback = (await import('../src/pm-scenario-skus.mjs')).buildWeatherEventReadoutFallback({});
+  assert.equal(weatherFallback.service_id, 'weather_event_readout');
+}
+
 // ---- unit: finance-cockpit -------------------------------------------------
 
 {
