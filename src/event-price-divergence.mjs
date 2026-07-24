@@ -97,9 +97,28 @@ export async function assessEventPriceDivergenceLive(input = {}, options = {}) {
 
   signals.sort((a, b) => b.confidence - a.confidence);
   const top = signals.slice(0, limit);
+  const source_status = {
+    as_of: new Date().toISOString(),
+    overall: assets.every((a) => a.ticker && a.markets) ? 'green'
+      : assets.some((a) => a.ticker || a.markets) ? 'yellow' : 'red',
+    assets: assets.map((a) => ({
+      asset: a.asset,
+      okx_ticker: a.ticker ? 'ok' : 'fail',
+      polymarket_search: a.markets ? 'ok' : 'fail',
+      pm_markets: Array.isArray(a.markets) ? a.markets.length : 0,
+      spot_change_24h_pct: a.ticker
+        ? round2(((a.ticker.last - a.ticker.open24h) / a.ticker.open24h) * 100)
+        : null
+    })),
+    thresholds: {
+      min_probability_change: MIN_PROB_CHANGE,
+      min_price_change_pct: MIN_PRICE_CHANGE_PCT,
+      min_market_volume_24h_usdt: MIN_MARKET_VOLUME_24H
+    }
+  };
 
   return {
-    schema_version: '0.1',
+    schema_version: '0.2',
     service_id: SERVICE_ID,
     mode: 'live',
     generated_at: new Date().toISOString(),
@@ -118,7 +137,8 @@ export async function assessEventPriceDivergenceLive(input = {}, options = {}) {
       price_provider: 'okx_public_market_ticker (last vs open24h)',
       min_probability_change: MIN_PROB_CHANGE,
       min_price_change_pct: MIN_PRICE_CHANGE_PCT,
-      min_market_volume_24h_usdt: MIN_MARKET_VOLUME_24H
+      min_market_volume_24h_usdt: MIN_MARKET_VOLUME_24H,
+      source_status
     }
   };
 }

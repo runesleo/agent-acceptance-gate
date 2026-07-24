@@ -50,6 +50,14 @@ import {
   assessContentSlopCheck,
   buildContentSlopCheckFallback
 } from '../src/content-slop-check.mjs';
+import {
+  assessPmBrierLive,
+  buildPmBrierFallback
+} from '../src/pm-brier.mjs';
+import {
+  assessPublishReadiness,
+  buildPublishReadinessFallback
+} from '../src/publish-readiness.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
@@ -103,6 +111,10 @@ const PAID_RADAR_ROUTES = {
     description: 'PM Profile — read-only Polymarket wallet snapshot (7d LB PnL + positions sample). Productized from polymarket-toolkit.',
     load: (payload) => pmProfileWithCache(payload)
   },
+  '/pm-brier': {
+    description: 'PM Brier — read-only calibration score from settled Polymarket positions (Brier). Productized from polymarket-toolkit.',
+    load: (payload) => pmBrierWithCache(payload)
+  },
   '/agent-budget-preflight': {
     description: 'Agent Budget Preflight — deterministic buy/skip/reject gate before an agent pays for an API/x402 call. No wallet, no settle. From arc-budget-agent policy.',
     load: (payload) => runAgentBudgetPreflight(payload)
@@ -131,6 +143,10 @@ const PAID_RADAR_ROUTES = {
   '/content-slop-check': {
     description: 'Content Slop Check — rule-based AI-filler / spam-pattern detector for draft text; returns slop_score and flags. Not a rewrite service.',
     load: (payload) => runContentSlopCheck(payload)
+  },
+  '/publish-readiness': {
+    description: 'Publish Readiness — combines slop check + claim verify into ready / edit_first / block before publish. No rewrite, no post.',
+    load: (payload) => runPublishReadiness(payload)
   }
 };
 
@@ -324,10 +340,11 @@ async function sportsUpsetAlertWithCache(payload) {
   const sport = String(payload?.sport ?? 'all').trim().toLowerCase();
   const league = String(payload?.league ?? '').trim().toLowerCase();
   const query = String(payload?.query ?? payload?.market ?? 'all').trim().toLowerCase();
+  const maxProb = String(payload?.max_prob ?? payload?.max_implied_probability ?? '0.35');
   const limit = Number.parseInt(payload?.limit, 10) || 5;
 
   return radarWithCache({
-    cacheKey: `sports-upset|${sport}|${league}|${query}|${limit}`,
+    cacheKey: `sports-upset|${sport}|${league}|${query}|${maxProb}|${limit}`,
     loadLive: () => assessSportsUpsetAlertLive(payload),
     loadFallback: () => buildSportsUpsetAlertFallback(payload)
   });
@@ -343,6 +360,20 @@ async function pmProfileWithCache(payload) {
     cacheKey: `pm-profile|${key}`,
     loadLive: () => assessPmProfileLive(payload),
     loadFallback: () => buildPmProfileFallback(payload)
+  });
+}
+
+async function pmBrierWithCache(payload) {
+  const key = String(payload?.address ?? payload?.wallet ?? payload?.username ?? payload?.query ?? '').trim().toLowerCase();
+  if (!key) {
+    throw new Error('pm-brier requires address or username.');
+  }
+  const limit = Number.parseInt(payload?.limit, 10) || 200;
+
+  return radarWithCache({
+    cacheKey: `pm-brier|${key}|${limit}`,
+    loadLive: () => assessPmBrierLive(payload),
+    loadFallback: () => buildPmBrierFallback(payload)
   });
 }
 
@@ -475,6 +506,15 @@ function runAgentBudgetPreflight(payload) {
   }
 }
 
+function runPublishReadiness(payload) {
+  try {
+    return assessPublishReadiness(payload);
+  } catch (error) {
+    if (String(error?.message || error).includes('required')) throw error;
+    return buildPublishReadinessFallback(payload);
+  }
+}
+
 // ---- Agent Delivery Audit Gate ---------------------------------------------
 // Accepts either the full auditor schema ({task, delivery, context}) or the
 // compact buyer shape {task, delivery_summary, artifacts, validation,
@@ -589,6 +629,8 @@ function samplePayloadForPath(pathname) {
       return { sport: 'football', league: 'epl', limit: 2 };
     case '/pm-profile':
       return { address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a' };
+    case '/pm-brier':
+      return { address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a', limit: 50 };
     case '/agent-budget-preflight':
       return {
         budget_cap_usdt: 1,
@@ -627,6 +669,12 @@ function samplePayloadForPath(pathname) {
     case '/content-slop-check':
       return {
         text: 'In today\'s digital landscape, it is crucial to delve into synergy and leverage robust holistic frameworks. As an AI, I am excited to underscore the importance of this game-changer.'
+      };
+    case '/publish-readiness':
+      return {
+        text: 'Marketplace scan on 2026-07-07 found 358 unique ASPs and 2982 cumulative soldCount.',
+        claims: ['Marketplace has 358 unique ASPs and 2982 cumulative soldCount.'],
+        sources: [{ text: 'Marketplace scan on 2026-07-07 found 358 unique ASPs and 2982 cumulative soldCount.' }]
       };
     default:
       return { limit: 2 };

@@ -753,6 +753,189 @@ const BASE = 'https://gate.example.com';
   assert.ok(sloppy.slop_flags.length >= 2);
 }
 
+// ---- unit: pm-brier ---------------------------------------------------------
+
+{
+  const { assessPmBrierLive } = await import('../src/pm-brier.mjs');
+  const mockBrier = async (url) => {
+    const u = String(url);
+    if (u.includes('data-api.polymarket.com/positions')) {
+      return new Response(JSON.stringify([
+        { title: 'A', redeemable: true, avgPrice: 0.7, currentValue: 1 },
+        { title: 'B', redeemable: true, avgPrice: 0.2, currentValue: 0 },
+        { title: 'C', redeemable: false, avgPrice: 0.5, currentValue: 0.5 }
+      ]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+  const brier = await assessPmBrierLive(
+    { address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a' },
+    { fetchImpl: mockBrier }
+  );
+  assert.equal(brier.service_id, 'pm_brier');
+  assert.equal(brier.settled_markets, 2);
+  assert.equal(brier.wins, 1);
+  // mean((0.7-1)^2 + (0.2-0)^2) = (0.09 + 0.04)/2 = 0.065
+  assert.equal(brier.brier, 0.065);
+  assert.equal(brier.rating, 'good');
+}
+
+// ---- unit: sports upset max_prob + smart-money cohort -----------------------
+
+{
+  const { assessSportsUpsetAlertLive } = await import('../src/sports-upset-alert.mjs');
+  const marketsPayload = [{
+    conditionId: '0xm1',
+    slug: 'underdog-yes',
+    question: 'Underdog wins?',
+    active: true,
+    closed: false,
+    volume24hr: 90000,
+    outcomes: '["Yes","No"]',
+    outcomePrices: '["0.22","0.78"]'
+  }, {
+    conditionId: '0xm2',
+    slug: 'other-yes',
+    question: 'Other event?',
+    active: true,
+    closed: false,
+    volume24hr: 80000,
+    outcomes: '["Yes","No"]',
+    outcomePrices: '["0.40","0.60"]'
+  }];
+
+  const mockUpset = async (url) => {
+    const u = String(url);
+    if (u.includes('/events?') || u.includes('/markets?') || u.includes('public-search')) {
+      if (u.includes('/markets?')) {
+        return new Response(JSON.stringify(marketsPayload), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify([{
+        title: 'Sports card',
+        closed: false,
+        volume24hr: 100000,
+        markets: marketsPayload
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/trades?')) {
+      const market = u.includes('0xm1') ? '0xm1' : '0xm2';
+      const price = market === '0xm1' ? 0.22 : 0.4;
+      return new Response(JSON.stringify([{
+        proxyWallet: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        side: 'BUY',
+        size: 2000,
+        price,
+        timestamp: 1_700_000_000,
+        outcome: 'Yes',
+        conditionId: market,
+        title: 'm'
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('lb-api.polymarket.com/profit')) {
+      return new Response(JSON.stringify([{ proxyWallet: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', amount: 1200 }]), {
+        status: 200, headers: { 'content-type': 'application/json' }
+      });
+    }
+    if (u.includes('/positions?')) {
+      return new Response(JSON.stringify([{ totalBought: 2000, avgPrice: 0.22, cashPnl: 10 }]), {
+        status: 200, headers: { 'content-type': 'application/json' }
+      });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+
+  const tight = await assessSportsUpsetAlertLive(
+    { sport: 'football', league: 'epl', max_prob: 0.15, limit: 5 },
+    { fetchImpl: mockUpset }
+  );
+  assert.equal(tight.input.max_prob, 0.15);
+  assert.equal(tight.upset_alerts.length, 0);
+
+  const loose = await assessSportsUpsetAlertLive(
+    { sport: 'football', league: 'epl', max_prob: 0.35, limit: 5 },
+    { fetchImpl: mockUpset }
+  );
+  assert.ok(loose.upset_alerts.length >= 1);
+  assert.ok(Array.isArray(loose.wallet_cohort));
+}
+
+{
+  const { assessSportsSmartMoneyLive } = await import('../src/worldcup-smart-money-live.mjs');
+  const mockSm = async (url) => {
+    const u = String(url);
+    if (u.includes('/events?') || u.includes('public-search') || u.includes('/markets?')) {
+      const markets = [{
+        conditionId: '0xa',
+        slug: 'm-a',
+        question: 'Match A',
+        active: true,
+        closed: false,
+        volume24hr: 50000,
+        outcomes: '["Yes","No"]',
+        outcomePrices: '["0.5","0.5"]'
+      }, {
+        conditionId: '0xb',
+        slug: 'm-b',
+        question: 'Match B',
+        active: true,
+        closed: false,
+        volume24hr: 40000,
+        outcomes: '["Yes","No"]',
+        outcomePrices: '["0.5","0.5"]'
+      }];
+      if (u.includes('/markets?')) {
+        return new Response(JSON.stringify(markets), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify([{ title: 'card', closed: false, markets }]), {
+        status: 200, headers: { 'content-type': 'application/json' }
+      });
+    }
+    if (u.includes('/trades?')) {
+      return new Response(JSON.stringify([{
+        proxyWallet: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        side: 'BUY', size: 3000, price: 0.45, timestamp: 1_700_000_100,
+        outcome: 'Yes', conditionId: u.includes('0xa') ? '0xa' : '0xb'
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('lb-api')) {
+      return new Response(JSON.stringify([{ amount: 500 }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/positions?')) {
+      return new Response(JSON.stringify([{ totalBought: 3000, avgPrice: 0.45, cashPnl: 1 }]), {
+        status: 200, headers: { 'content-type': 'application/json' }
+      });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+  const sm = await assessSportsSmartMoneyLive(
+    { sport: 'tennis', limit: 3 },
+    { fetchImpl: mockSm }
+  );
+  assert.ok(Array.isArray(sm.wallet_cohort));
+  assert.ok(sm.wallet_cohort.some((w) => w.cross_market === true));
+  assert.ok(sm.schema_version === '0.3');
+}
+
+// ---- unit: publish-readiness ------------------------------------------------
+
+{
+  const { assessPublishReadiness } = await import('../src/publish-readiness.mjs');
+  const blocked = assessPublishReadiness({
+    text: "In today's digital landscape, it is crucial to delve into synergy. As an AI, I am excited to underscore this game-changer."
+  });
+  assert.equal(blocked.service_id, 'publish_readiness');
+  assert.equal(blocked.action, 'block');
+  assert.ok(blocked.buyer_summary_zh.includes('先别发') || blocked.blockers.length >= 1);
+
+  const ready = assessPublishReadiness({
+    text: 'Marketplace scan on 2026-07-07 found 358 unique ASPs and 2982 cumulative soldCount.',
+    claims: ['Marketplace has 358 unique ASPs and 2982 cumulative soldCount.'],
+    sources: [{ text: 'Marketplace scan on 2026-07-07 found 358 unique ASPs and 2982 cumulative soldCount.' }]
+  });
+  assert.equal(ready.action, 'ready');
+  assert.ok(typeof ready.buyer_summary_zh === 'string');
+}
+
 // ---- worker integration (degraded fallback, no external network) ------------
 
 const savedFetch = globalThis.fetch;

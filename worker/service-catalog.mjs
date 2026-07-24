@@ -16,7 +16,9 @@ export const LISTED_SERVICE_PATHS = new Set([
   '/sports-upset-alert',
   '/pm-profile',
   '/content-slop-check',
-  '/agent-budget-preflight'
+  '/agent-budget-preflight',
+  '/pm-brier',
+  '/publish-readiness'
 ]);
 
 export const SERVICE_CATALOG = {
@@ -155,6 +157,24 @@ export const SERVICE_CATALOG = {
     fee_usdt: '0.1',
     fee_atomic: '100000',
     mode: 'live'
+  },
+  '/pm-brier': {
+    service_id: 'pm_brier',
+    okx_service_id: 36668,
+    title: 'PM Brier',
+    category: 'finance',
+    fee_usdt: '0.05',
+    fee_atomic: '50000',
+    mode: 'live'
+  },
+  '/publish-readiness': {
+    service_id: 'publish_readiness',
+    okx_service_id: 36669,
+    title: 'Publish Readiness',
+    category: 'agent_ops',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live'
   }
 };
 
@@ -227,6 +247,48 @@ export const OKX_LISTING_COPY = {
     serviceDescription:
       'Rule-based check that publish claims overlap caller-supplied source excerpts; pass, needs_review, or fail.\n'
       + '发布前断言核查：对照你提供的原文摘录核对数字/关键词。输入 claims[] + sources[].text；不抓网页。'
+  },
+  36661: {
+    serviceName: 'Sports Smart Money Radar',
+    serviceDescription:
+      'Heuristic sports prediction-market wallet signals (football leagues, tennis, NBA, NFL, UFC, MLB, etc.); data only.\n'
+      + '体育预测市场聪明钱雷达：不绑死世界杯。输入 sport + 可选 league/query/tag_slug + limit。'
+  },
+  36662: {
+    serviceName: 'Sports Upset Alert',
+    serviceDescription:
+      'Flags profitable wallets entering low-probability sports outcomes across competitions; data only.\n'
+      + '体育冷门预警：盈利钱包买低概率侧。输入 sport/league/query + 可选 max_prob；非投注建议。'
+  },
+  36663: {
+    serviceName: 'PM Profile',
+    serviceDescription:
+      'Read-only Polymarket wallet snapshot: 7d leaderboard PnL + open positions sample. From public APIs / polymarket-toolkit lineage.\n'
+      + 'Polymarket 钱包画像：7日榜 PnL + 持仓抽样。输入 address 或 username；只读不下单。'
+  },
+  36664: {
+    serviceName: 'Content Slop Check',
+    serviceDescription:
+      'Rule-based AI-slop / filler detection for draft text before publish; returns slop_score and flags. Not a rewrite service.\n'
+      + '发布前注水/AI 废话检测：输出 slop_score 与旗帜。输入 text；不改写、不发帖。'
+  },
+  36666: {
+    serviceName: 'Agent Budget Preflight',
+    serviceDescription:
+      'Deterministic spend gate before an agent pays for an API/x402 call: buy / skip_sufficient / reject with reasons. No wallet, no settle.\n'
+      + 'Agent 付费调用前预算闸门：输出 buy/跳过/拒绝及原因。输入 budget_cap_usdt + offer.price_usdt；不签名、不结算。'
+  },
+  36668: {
+    serviceName: 'PM Brier',
+    serviceDescription:
+      'Read-only Polymarket calibration score from settled positions (Brier); good/moderate/poor rating. From polymarket-toolkit lineage.\n'
+      + 'Polymarket 校准分（Brier）：已结算持仓抽样。输入 address 或 username；只读不下单。'
+  },
+  36669: {
+    serviceName: 'Publish Readiness',
+    serviceDescription:
+      'Pre-publish gate combining slop detection + claim/source overlap; returns ready / edit_first / block with Chinese buyer summary.\n'
+      + '发布就绪闸门：注水检测 + 断言核查 → ready/先改/别发。输入 text + 可选 claims[]/sources[]；不改写、不发帖。'
   }
 };
 
@@ -261,6 +323,18 @@ export const PENDING_OKX_LISTING_COPY = {
     serviceDescription:
       'Deterministic spend gate before an agent pays for an API/x402 call: buy / skip_sufficient / reject with reasons. No wallet, no settle.\n'
       + 'Agent 付费调用前预算闸门：输出 buy/跳过/拒绝及原因。输入 budget_cap_usdt + offer.price_usdt；不签名、不结算。'
+  },
+  pm_brier: {
+    serviceName: 'PM Brier',
+    serviceDescription:
+      'Read-only Polymarket calibration score from settled positions (Brier); good/moderate/poor rating. From polymarket-toolkit lineage.\n'
+      + 'Polymarket 校准分（Brier）：已结算持仓抽样。输入 address 或 username；只读不下单。'
+  },
+  publish_readiness: {
+    serviceName: 'Publish Readiness',
+    serviceDescription:
+      'Pre-publish gate combining slop detection + claim/source overlap; returns ready / edit_first / block with Chinese buyer summary.\n'
+      + '发布就绪闸门：注水检测 + 断言核查 → ready/先改/别发。输入 text + 可选 claims[]/sources[]；不改写、不发帖。'
   },
   crypto_market_regime_radar: OKX_LISTING_COPY[30211],
   world_cup_upset_alert: OKX_LISTING_COPY[30212],

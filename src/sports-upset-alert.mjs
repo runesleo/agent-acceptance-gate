@@ -35,6 +35,13 @@ export async function assessSportsUpsetAlertLive(input = {}, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const limit = clampInteger(input.limit, 1, 10, 5);
   const serviceId = options.serviceId ?? SERVICE_ID;
+  const maxProb = clampProbability(
+    input.max_prob ?? input.max_implied_probability ?? input.max_upset_probability,
+    0.05,
+    0.5,
+    MAX_UPSET_PROBABILITY
+  );
+  const deepProb = Math.min(DEEP_UPSET_PROBABILITY, maxProb * 0.6);
 
   let markets;
   let usedFallback;
@@ -52,11 +59,15 @@ export async function assessSportsUpsetAlertLive(input = {}, options = {}) {
     discovery = resolved.discovery;
   }
 
-  const { scanned, enriched } = await scanMarketsForSmartMoney(fetchImpl, markets, SCAN_CANDIDATES);
+  const { scanned, enriched, wallet_cohort = [] } = await scanMarketsForSmartMoney(
+    fetchImpl,
+    markets,
+    SCAN_CANDIDATES
+  );
 
   const alerts = enriched
-    .filter(isUpsetCandidate)
-    .map(buildUpsetAlert)
+    .filter((signal) => isUpsetCandidate(signal, maxProb))
+    .map((signal) => buildUpsetAlert(signal, deepProb))
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, limit);
 
@@ -66,9 +77,12 @@ export async function assessSportsUpsetAlertLive(input = {}, options = {}) {
       ? 'No active World Cup markets matched; fell back to Polymarket top-volume markets site-wide.'
       : 'No active scoped sports markets matched; fell back to top-volume / search.');
   }
+  if (maxProb !== MAX_UPSET_PROBABILITY) {
+    caveats.push(`Caller overridden max_implied_probability=${maxProb} (default ${MAX_UPSET_PROBABILITY}).`);
+  }
 
   return {
-    schema_version: '0.2',
+    schema_version: '0.3',
     service_id: serviceId,
     mode: 'live',
     generated_at: new Date().toISOString(),
@@ -77,10 +91,12 @@ export async function assessSportsUpsetAlertLive(input = {}, options = {}) {
       league: input.league ?? null,
       tag_slug: input.tag_slug ?? null,
       query: input.query ?? input.market ?? input.market_id ?? 'all',
+      max_prob: maxProb,
       limit
     },
     summary: buildSummary(alerts, scanned, enriched),
     upset_alerts: alerts,
+    wallet_cohort: wallet_cohort.filter((w) => w.cross_market).slice(0, 5),
     caveats,
     next_gate: 'OKX_ASP_listing_changes_require_Leo_approval',
     source: {
@@ -89,7 +105,8 @@ export async function assessSportsUpsetAlertLive(input = {}, options = {}) {
       filter: {
         wallet_7d_pnl: '> 0 (leaderboard-confirmed profitable wallets only)',
         action: 'new_position or increased_position (net buying)',
-        max_implied_probability: MAX_UPSET_PROBABILITY
+        max_implied_probability: maxProb,
+        deep_upset_probability: deepProb
       },
       discovery,
       markets_scanned: scanned.map((market) => ({
@@ -125,19 +142,19 @@ export function buildSportsUpsetAlertFallback(input = {}) {
   };
 }
 
-function isUpsetCandidate(signal) {
+function isUpsetCandidate(signal, maxProb = MAX_UPSET_PROBABILITY) {
   const price = Number(signal.last_trade_price);
   const pnl = signal.seven_day_pnl_usdt;
   const action = signal.action;
-  if (!Number.isFinite(price) || price >= MAX_UPSET_PROBABILITY) return false;
+  if (!Number.isFinite(price) || price >= maxProb) return false;
   if (pnl === null || pnl === undefined || Number(pnl) <= 0) return false;
   if (action !== 'new_position' && action !== 'increased_position') return false;
   return true;
 }
 
-function buildUpsetAlert(signal) {
+function buildUpsetAlert(signal, deepProb = DEEP_UPSET_PROBABILITY) {
   const price = Number(signal.last_trade_price);
-  const deep = price < DEEP_UPSET_PROBABILITY;
+  const deep = price < deepProb;
   return {
     ...signal,
     upset_band: deep ? 'deep_upset' : 'upset',
@@ -156,6 +173,12 @@ function normalizeText(value) {
 
 function clampInteger(value, min, max, fallback) {
   const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function clampProbability(value, min, max, fallback) {
+  const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
 }

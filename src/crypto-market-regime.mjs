@@ -99,9 +99,10 @@ export async function assessCryptoMarketRegimeLive(input = {}, options = {}) {
   const { score, regime } = scoreRegime(scoredDimensions);
   const confidence = scoreConfidence(score, scoredDimensions, dimensions.length);
   const watchItems = buildWatchItems(readouts, scoredDimensions).slice(0, limit);
+  const source_status = buildRegimeSourceStatus(assets, dimensions);
 
   return {
-    schema_version: '0.1',
+    schema_version: '0.2',
     service_id: SERVICE_ID,
     mode: 'live',
     generated_at: new Date().toISOString(),
@@ -126,6 +127,7 @@ export async function assessCryptoMarketRegimeLive(input = {}, options = {}) {
       funding_provider: 'okx_public_funding_rate (fundingRate + premium)',
       open_interest_provider: 'okx_public_open_interest (context only, not scored)',
       probability_provider: 'polymarket_gamma_public_search (oneDayPriceChange, volume-weighted)',
+      source_status,
       method: {
         formula: 'score = 50 + 50 * sum(weight_pct/100 * normalized_score); normalized_score in [-1, +1] per dimension',
         regime_rule: 'mixed when two dimensions conflict at |normalized| >= 0.35; else risk_on if score >= 60, risk_off if score <= 40, neutral otherwise',
@@ -134,6 +136,32 @@ export async function assessCryptoMarketRegimeLive(input = {}, options = {}) {
         )
       }
     }
+  };
+}
+
+function buildRegimeSourceStatus(assets, dimensions) {
+  const perAsset = assets.map((a) => ({
+    asset: a.asset,
+    okx_ticker: a.ticker ? 'ok' : 'fail',
+    okx_funding: a.funding ? 'ok' : 'fail',
+    okx_open_interest: a.openInterest ? 'ok' : 'fail',
+    polymarket_search: a.pmMarkets ? 'ok' : 'fail',
+    pm_markets: Array.isArray(a.pmMarkets) ? a.pmMarkets.length : 0
+  }));
+  const dims = dimensions.map((d) => ({
+    dimension: d.dimension,
+    status: d.normalized_score === null ? 'missing' : 'ok',
+    contribution_points: d.contribution_points ?? null
+  }));
+  const failCount = perAsset.reduce(
+    (n, row) => n + ['okx_ticker', 'okx_funding', 'polymarket_search'].filter((k) => row[k] === 'fail').length,
+    0
+  );
+  return {
+    as_of: new Date().toISOString(),
+    overall: failCount === 0 ? 'green' : (failCount <= 2 ? 'yellow' : 'red'),
+    assets: perAsset,
+    dimensions: dims
   };
 }
 

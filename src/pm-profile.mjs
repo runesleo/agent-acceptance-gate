@@ -70,6 +70,10 @@ export async function assessPmProfileLive(input = {}, options = {}) {
   const openCount = posList.filter((p) => Math.abs(p.size) > 0).length;
   const approxPosPnl = posList.reduce((sum, p) => sum + (p.cash_pnl || 0), 0);
 
+  const displayName = pnl7d?.name ?? pnl7d?.pseudonym ?? null;
+  const pnl7dAmt = pnl7d?.amount ?? null;
+  const approxPnl = Math.round(approxPosPnl * 100) / 100;
+
   return {
     schema_version: '0.1',
     service_id: SERVICE_ID,
@@ -82,12 +86,13 @@ export async function assessPmProfileLive(input = {}, options = {}) {
     },
     profile: {
       address,
-      display_name: pnl7d?.name ?? pnl7d?.pseudonym ?? null,
-      pnl_7d_usdt: pnl7d?.amount ?? null,
+      display_name: displayName,
+      pnl_7d_usdt: pnl7dAmt,
       open_positions_sampled: openCount,
-      approx_positions_cash_pnl: Math.round(approxPosPnl * 100) / 100,
+      approx_positions_cash_pnl: approxPnl,
       positions_sample: posList.slice(0, 20)
     },
+    buyer_summary_zh: buildBuyerSummaryZh({ displayName, address, pnl7dAmt, openCount, approxPnl }),
     confidence_gaps: [
       ...(pnl7d ? [] : ['not_on_7d_leaderboard']),
       'positions_page_capped',
@@ -161,4 +166,18 @@ async function fetchJson(fetchImpl, url) {
 function toNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function buildBuyerSummaryZh({ displayName, address, pnl7dAmt, openCount, approxPnl }) {
+  const who = displayName || shorten(address);
+  const pnlBit = pnl7dAmt == null
+    ? '7日榜无记录'
+    : `7日榜 PnL ${pnl7dAmt >= 0 ? '+' : ''}${pnl7dAmt} USDT`;
+  return `${who}：${pnlBit}；抽样持仓 ${openCount} 个，持仓现金盈亏约 ${approxPnl} USDT。只读画像，非下单建议。`;
+}
+
+function shorten(address) {
+  const value = String(address ?? '');
+  if (!value.startsWith('0x') || value.length < 12) return value || '钱包';
+  return `${value.slice(0, 6)}…${value.slice(-4)}`;
 }

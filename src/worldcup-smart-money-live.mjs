@@ -149,24 +149,85 @@ export async function scanMarketsForSmartMoney(fetchImpl, markets, limit) {
   );
 
   const aggregates = aggregateWalletFlows(scanned, tradesPerMarket);
-  const top = aggregates.slice(0, limit);
+  // Enrich a wider cut so cross-market cohort can reuse 7d PnL lookups.
+  const enrichCut = aggregates.slice(0, Math.max(limit, 16));
 
-  const enriched = await Promise.all(top.map(async (entry) => {
-    const [pnl, position] = await Promise.all([
-      fetchSevenDayPnl(fetchImpl, entry.wallet).catch(() => null),
-      fetchPosition(fetchImpl, entry.wallet, entry.condition_id).catch(() => null)
-    ]);
+  const pnlCache = new Map();
+  const enriched = await Promise.all(enrichCut.map(async (entry) => {
+    let pnl = pnlCache.get(entry.wallet);
+    if (pnl === undefined) {
+      pnl = await fetchSevenDayPnl(fetchImpl, entry.wallet).catch(() => null);
+      pnlCache.set(entry.wallet, pnl);
+    }
+    const position = await fetchPosition(fetchImpl, entry.wallet, entry.condition_id).catch(() => null);
     return buildSignal(entry, pnl, position);
   }));
 
   // Prefer mid-price signals; keep near-settled only as filler if we lack cleaner ones.
   const ranked = rankSignalsPreferClean(enriched).slice(0, limit);
+  const wallet_cohort = buildWalletCohort(aggregates, pnlCache);
 
-  return { scanned, enriched: ranked };
+  return { scanned, enriched: ranked, wallet_cohort, aggregates_count: aggregates.length };
+}
+
+function buildWalletCohort(aggregates, pnlCache = new Map()) {
+  const byWallet = new Map();
+  for (const entry of aggregates) {
+    let row = byWallet.get(entry.wallet);
+    if (!row) {
+      row = {
+        wallet: entry.wallet,
+        address_label: shortenAddress(entry.wallet),
+        market_ids: new Set(),
+        market_titles: [],
+        outcomes: [],
+        gross_notional: 0,
+        trade_count: 0
+      };
+      byWallet.set(entry.wallet, row);
+    }
+    if (!row.market_ids.has(entry.condition_id)) {
+      row.market_ids.add(entry.condition_id);
+      if (row.market_titles.length < 6) row.market_titles.push(entry.market_title);
+    }
+    row.outcomes.push({
+      market_title: entry.market_title,
+      outcome: entry.outcome,
+      notional_usdt: round2(entry.gross_notional)
+    });
+    row.gross_notional += entry.gross_notional;
+    row.trade_count += entry.trade_count;
+  }
+
+  return [...byWallet.values()]
+    .map((row) => {
+      const markets_touched = row.market_ids.size;
+      const pnl = pnlCache.has(row.wallet) ? pnlCache.get(row.wallet) : null;
+      return {
+        address_label: row.address_label,
+        markets_touched,
+        cross_market: markets_touched >= 2,
+        market_titles: row.market_titles,
+        outcomes_sample: row.outcomes
+          .slice()
+          .sort((a, b) => b.notional_usdt - a.notional_usdt)
+          .slice(0, 4),
+        gross_notional_usdt: round2(row.gross_notional),
+        trade_count: row.trade_count,
+        seven_day_pnl_usdt: pnl
+      };
+    })
+    .filter((row) => row.cross_market || row.gross_notional_usdt >= 2500)
+    .sort((a, b) => {
+      if (a.cross_market !== b.cross_market) return a.cross_market ? -1 : 1;
+      if (b.markets_touched !== a.markets_touched) return b.markets_touched - a.markets_touched;
+      return b.gross_notional_usdt - a.gross_notional_usdt;
+    })
+    .slice(0, 8);
 }
 
 function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan, extraSource = null }) {
-  const { scanned, enriched } = scan;
+  const { scanned, enriched, wallet_cohort = [] } = scan;
   const missingPnl = enriched.some((signal) => signal.seven_day_pnl_usdt === null);
 
   const caveats = [...STANDARD_CAVEATS];
@@ -176,15 +237,20 @@ function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan, extraSo
   if (missingPnl) {
     caveats.push('seven_day_pnl_usdt is null for wallets not present on the Polymarket 7-day profit leaderboard; values are never estimated.');
   }
+  const crossMarket = wallet_cohort.filter((w) => w.cross_market).length;
+  if (crossMarket > 0) {
+    caveats.push(`${crossMarket} wallet(s) appear across ≥2 scanned markets (wallet_cohort); still heuristic, not coordinated-trading proof.`);
+  }
 
   return {
-    schema_version: '0.2',
+    schema_version: '0.3',
     service_id: serviceId,
     mode: 'live',
     generated_at: new Date().toISOString(),
     input: inputEcho,
-    summary: buildSummary(enriched),
+    summary: buildSummary(enriched, wallet_cohort),
     signals: enriched,
+    wallet_cohort,
     caveats,
     next_gate: 'OKX_ASP_listing_changes_require_Leo_approval',
     source: {
@@ -196,6 +262,7 @@ function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan, extraSo
       })),
       min_trade_notional_usdt: MIN_TRADE_NOTIONAL_USDT,
       max_markets_scanned: MAX_MARKETS_SCANNED,
+      wallet_cohort_rule: 'wallets touching ≥2 markets OR ≥$2500 gross notional in scan window',
       ...(extraSource && typeof extraSource === 'object' ? extraSource : {})
     }
   };
@@ -601,12 +668,14 @@ function buildRationale(entry, action, sevenDayPnl, position) {
   return parts.join(' ');
 }
 
-function buildSummary(signals) {
+function buildSummary(signals, walletCohort = []) {
   if (!signals.length) {
     return 'No large smart-money movement found in the scanned Polymarket markets.';
   }
   const top = signals.slice().sort((a, b) => b.confidence - a.confidence)[0];
-  return `${signals.length} smart-money movements found. Top signal: ${top.action} on ${top.side} in ${top.market_title}.`;
+  const cross = walletCohort.filter((w) => w.cross_market).length;
+  const cohortNote = cross > 0 ? ` Cross-market cohort: ${cross} wallet(s).` : '';
+  return `${signals.length} smart-money movements found. Top signal: ${top.action} on ${top.side} in ${top.market_title}.${cohortNote}`;
 }
 
 async function fetchJson(fetchImpl, url) {
