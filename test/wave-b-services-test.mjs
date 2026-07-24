@@ -1003,6 +1003,10 @@ const BASE = 'https://gate.example.com';
   assert.equal(card.service_id, 'pm_decision_card');
   assert.ok(['skip', 'watch', 'eligible_for_manual_review'].includes(card.action));
   assert.ok(card.value_loop?.stale_after_minutes);
+  assert.ok(card.value_loop?.stale_at);
+  assert.ok(card.buyer_summary_en);
+  assert.ok(card.paid_checks?.checks?.length >= 6);
+  assert.equal(typeof card.paid_checks.pass_count, 'number');
   assert.ok(card.decision_card?.next_actions?.length >= 1);
 }
 

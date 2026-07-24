@@ -55,9 +55,14 @@ export async function assessPmDecisionCardLive(input = {}, options = {}) {
   const readout = readoutResult.status === 'fulfilled' ? readoutResult.value : null;
 
   const decision = composeDecision(preflight, readout);
+  const generated_at = new Date().toISOString();
+  const stale_after_minutes = 5;
+  const stale_at = new Date(Date.parse(generated_at) + stale_after_minutes * 60_000).toISOString();
+  const paid_checks = buildPaidChecks(preflight, readout, decision);
   const value_loop = {
     why_pay_again: 'Market price, spread, volume and event matrix change; re-run before each order attempt.',
-    stale_after_minutes: 5,
+    stale_after_minutes,
+    stale_at,
     best_used_in: 'agent_trading_loop_before_manual_or_automated_order',
     not_a_subscription_to: 'price_alerts_or_auto_execution',
     paid_value_tier: 'A_repeat_trading_loop',
@@ -67,10 +72,10 @@ export async function assessPmDecisionCardLive(input = {}, options = {}) {
   };
 
   return {
-    schema_version: '0.1',
+    schema_version: '0.2',
     service_id: SERVICE_ID,
     mode: 'live',
-    generated_at: new Date().toISOString(),
+    generated_at,
     input: {
       market_url: input.market_url ?? null,
       condition_id: ref.condition_id,
@@ -82,6 +87,8 @@ export async function assessPmDecisionCardLive(input = {}, options = {}) {
     action: decision.action,
     confidence: decision.confidence,
     buyer_summary_zh: decision.buyer_summary_zh,
+    buyer_summary_en: decision.buyer_summary_en,
+    paid_checks,
     value_loop,
     agent_loop: {
       step_1: 'Call this card with market ref + side (+ size_usd)',
@@ -96,7 +103,8 @@ export async function assessPmDecisionCardLive(input = {}, options = {}) {
       reasons: decision.reasons,
       risk_flags: decision.risk_flags,
       next_actions: decision.next_actions,
-      event_context: decision.event_context
+      event_context: decision.event_context,
+      paid_checks
     },
     preflight: {
       action: preflight.action,
@@ -142,18 +150,27 @@ export async function assessPmDecisionCardLive(input = {}, options = {}) {
 
 export function buildPmDecisionCardFallback(input = {}) {
   const preflight = buildPmTradePreflightFallback(input);
+  const generated_at = new Date().toISOString();
   return {
-    schema_version: '0.1',
+    schema_version: '0.2',
     service_id: SERVICE_ID,
     mode: 'public_safe_demo',
-    generated_at: new Date().toISOString(),
+    generated_at,
     input: preflight.input,
     action: 'watch',
     confidence: 0.4,
     buyer_summary_zh: '演示回退：决策卡不可用，默认 watch。',
+    buyer_summary_en: 'Demo fallback: decision card unavailable; default watch.',
+    paid_checks: {
+      pass_count: 0,
+      fail_count: 1,
+      warn_count: 0,
+      checks: [{ id: 'live_market', status: 'fail', detail: 'live_data_unavailable' }]
+    },
     value_loop: {
       why_pay_again: 'Live market state changes; re-run before each order attempt.',
       stale_after_minutes: 5,
+      stale_at: new Date(Date.parse(generated_at) + 5 * 60_000).toISOString(),
       best_used_in: 'agent_trading_loop_before_manual_or_automated_order',
       not_a_subscription_to: 'price_alerts_or_auto_execution'
     },
@@ -218,6 +235,7 @@ function composeDecision(preflight, readout) {
   }
 
   const buyer_summary_zh = buildBuyerSummaryZh(action, preflight, readout, confidence);
+  const buyer_summary_en = buildBuyerSummaryEn(action, preflight, readout, confidence);
 
   return {
     action,
@@ -226,7 +244,8 @@ function composeDecision(preflight, readout) {
     risk_flags: [...new Set(risk_flags)],
     next_actions,
     event_context,
-    buyer_summary_zh
+    buyer_summary_zh,
+    buyer_summary_en
   };
 }
 
@@ -235,6 +254,48 @@ function mapPreflightAction(action) {
   if (action === 'watch') return 'watch';
   if (action === 'eligible') return 'eligible_for_manual_review';
   return 'watch';
+}
+
+function buildPaidChecks(preflight, readout, decision) {
+  const flags = new Set(decision.risk_flags || []);
+  const checks = [
+    checkFromFlag('market_open', !flags.has('market_closed_or_inactive'), 'market not closed/inactive'),
+    checkFromFlag('side_price', !flags.has('missing_side_price'), `side_price=${preflight.side_price ?? 'n/a'}`),
+    checkFromFlag('liquidity_24h', !flags.has('low_liquidity'), '24h volume vs threshold'),
+    checkFromFlag('spread', !flags.has('wide_spread'), 'bid/ask spread heuristic'),
+    checkFromFlag('price_zone', !flags.has('extreme_implied_probability'), 'not extreme entry zone'),
+    checkFromFlag('size_vs_volume', !flags.has('size_large_vs_daily_volume'), 'size vs 24h volume')
+  ];
+  if (readout) {
+    checks.push(
+      checkFromFlag(
+        'event_tradability',
+        !flags.has('event_tradability_weak'),
+        `tradability=${readout.tradability ?? 'n/a'}`
+      ),
+      checkFromFlag(
+        'event_matrix',
+        !flags.has('event_matrix_incomplete'),
+        `matrix_status=${readout.matrix_status ?? 'n/a'}`
+      ),
+      checkFromFlag(
+        'category_plugin',
+        !flags.has('category_plugin_no_trade_hint'),
+        `plugin_hint=${readout.category_plugin?.default_action_hint ?? 'none'}`
+      )
+    );
+  } else {
+    checks.push({ id: 'event_context', status: 'warn', detail: 'event context omitted or unavailable' });
+  }
+
+  const pass_count = checks.filter((c) => c.status === 'pass').length;
+  const fail_count = checks.filter((c) => c.status === 'fail').length;
+  const warn_count = checks.filter((c) => c.status === 'warn').length;
+  return { pass_count, fail_count, warn_count, checks };
+}
+
+function checkFromFlag(id, ok, detail) {
+  return { id, status: ok ? 'pass' : 'fail', detail };
 }
 
 function buildBuyerSummaryZh(action, preflight, readout, confidence) {
@@ -246,4 +307,15 @@ function buildBuyerSummaryZh(action, preflight, readout, confidence) {
   const price = preflight.side_price;
   const cat = readout?.category ? `；事件品类 ${readout.category}/${readout.tradability}` : '';
   return `决策卡：${actionZh}（置信 ${confidence}）。侧价 ${price ?? 'n/a'}${cat}。eligible≠买点；下单前再跑一次。`;
+}
+
+function buildBuyerSummaryEn(action, preflight, readout, confidence) {
+  const actionEn = {
+    skip: 'skip',
+    watch: 'watch',
+    eligible_for_manual_review: 'eligible for manual review (not a buy tip)'
+  }[action] || action;
+  const price = preflight.side_price;
+  const cat = readout?.category ? `; event ${readout.category}/${readout.tradability}` : '';
+  return `Decision card: ${actionEn} (confidence ${confidence}). Side price ${price ?? 'n/a'}${cat}. Re-run before any order.`;
 }
