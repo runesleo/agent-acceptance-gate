@@ -27,37 +27,65 @@ const DATA_BASE = 'https://data-api.polymarket.com';
 const LB_BASE = 'https://lb-api.polymarket.com';
 
 const MIN_TRADE_NOTIONAL_USDT = 500;
-const MAX_MARKETS_SCANNED = 3;
+const MAX_MARKETS_SCANNED = 8;
 const TRADES_PER_MARKET = 100;
 const FETCH_TIMEOUT_MS = 8000;
+/** Near-settled prices are usually noise for "smart money" reads (locking PnL / dust). */
+const NEAR_SETTLED_PRICE_LOW = 0.05;
+const NEAR_SETTLED_PRICE_HIGH = 0.95;
 
 const STANDARD_CAVEATS = [
   'Data and analytics only. Not investment advice, not betting advice, and not a guarantee of future returns.',
   'No wallet custody, no user funds, no trade execution, no order routing.',
-  'Smart-money signals are heuristic reads of recent large public trades on Polymarket and can be wrong or stale.'
+  'Smart-money signals are heuristic reads of recent large public trades on Polymarket and can be wrong or stale.',
+  'Signals with last_trade_price ≤0.05 or ≥0.95 are tagged near_settled_noise and demoted; prefer mid-price markets.'
 ];
 
 /**
  * Build the full live response payload.
  * Throws on upstream failure so callers can decide how to degrade.
+ * Internally uses sports-generic discovery with league=world_cup (legacy path).
  */
 export async function assessWorldCupSmartMoneyLive(input = {}, options = {}) {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const marketHint = normalizeText(input.market ?? input.market_id ?? input.query ?? 'all');
-  const limit = clampInteger(input.limit, 1, 10, 5);
+  return assessSportsSmartMoneyLive({
+    ...input,
+    sport: input.sport ?? 'football',
+    league: input.league ?? 'world_cup',
+    tag_slug: input.tag_slug ?? 'world-cup'
+  }, { ...options, serviceId: SERVICE_ID, legacyWorldCup: true });
+}
 
-  const { markets, usedFallback } = await resolveMarkets(fetchImpl, marketHint);
+/**
+ * Sports-generic Smart Money Radar — football leagues, tennis, NBA, NFL, UFC, MLB, etc.
+ * World Cup is one league tag, not the product identity.
+ */
+export async function assessSportsSmartMoneyLive(input = {}, options = {}) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const limit = clampInteger(input.limit, 1, 10, 5);
+  const scope = normalizeSportsScope(input);
+  const serviceId = options.serviceId ?? 'sports_smart_money_radar';
+
+  const { markets, usedFallback, discovery } = await resolveSportsMarkets(fetchImpl, scope);
+
+  const fallbackCaveat = usedFallback
+    ? (options.legacyWorldCup
+      ? 'No active World Cup markets matched; fell back to Polymarket top-volume markets site-wide.'
+      : `No active ${scope.label} markets matched; fell back to Polymarket top-volume / search.`)
+    : null;
 
   return buildLiveResponse({
-    serviceId: SERVICE_ID,
+    serviceId,
     inputEcho: {
-      market: input.market ?? input.market_id ?? input.query ?? 'all',
+      sport: scope.sport,
+      league: scope.league,
+      tag_slug: scope.tag_slug,
+      query: scope.query || 'all',
+      market: input.market ?? null,
       limit
     },
-    fallbackCaveat: usedFallback
-      ? 'No active World Cup markets matched; fell back to Polymarket top-volume markets site-wide.'
-      : null,
-    scan: await scanMarketsForSmartMoney(fetchImpl, markets, limit)
+    fallbackCaveat,
+    scan: await scanMarketsForSmartMoney(fetchImpl, markets, limit),
+    extraSource: { discovery, scope: scope.label }
   });
 }
 
@@ -66,14 +94,30 @@ export async function assessWorldCupSmartMoneyLive(input = {}, options = {}) {
  * radar, but market discovery searches the whole site: `market` / `topic` are
  * treated as free-text search terms (Gamma /public-search, with a top-volume
  * substring-match fallback); with no term it scans the top 24h-volume markets.
+ * Also accepts optional `event_type` / `tag_slug` for category-scoped scans
+ * (politics, crypto, sports, etc.).
  * Throws on upstream failure so callers can decide how to degrade.
  */
 export async function assessPolymarketSmartMoneyLive(input = {}, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const searchTerm = normalizeText(input.market ?? input.topic ?? input.query ?? 'all');
   const limit = clampInteger(input.limit, 1, 10, 5);
+  const tagSlug = normalizeText(input.tag_slug ?? input.event_type ?? '');
 
-  const { markets, usedFallback } = await resolvePolymarketMarkets(fetchImpl, searchTerm);
+  let resolved;
+  if (tagSlug && tagSlug !== 'all') {
+    resolved = await resolveSportsMarkets(fetchImpl, {
+      sport: 'all',
+      league: null,
+      tag_slug: tagSlug,
+      query: searchTerm === 'all' ? '' : searchTerm,
+      label: `tag:${tagSlug}`
+    });
+  } else {
+    resolved = await resolvePolymarketMarkets(fetchImpl, searchTerm);
+  }
+
+  const { markets, usedFallback } = resolved;
 
   return buildLiveResponse({
     serviceId: POLYMARKET_SERVICE_ID,
@@ -81,10 +125,12 @@ export async function assessPolymarketSmartMoneyLive(input = {}, options = {}) {
       market: input.market ?? null,
       topic: input.topic ?? null,
       query: searchTerm || 'all',
+      tag_slug: tagSlug || null,
+      event_type: input.event_type ?? null,
       limit
     },
     fallbackCaveat: usedFallback
-      ? `No active Polymarket markets matched "${searchTerm}"; fell back to top-volume markets site-wide.`
+      ? `No active Polymarket markets matched "${searchTerm || tagSlug}"; fell back to top-volume markets site-wide.`
       : null,
     scan: await scanMarketsForSmartMoney(fetchImpl, markets, limit)
   });
@@ -113,10 +159,13 @@ export async function scanMarketsForSmartMoney(fetchImpl, markets, limit) {
     return buildSignal(entry, pnl, position);
   }));
 
-  return { scanned, enriched };
+  // Prefer mid-price signals; keep near-settled only as filler if we lack cleaner ones.
+  const ranked = rankSignalsPreferClean(enriched).slice(0, limit);
+
+  return { scanned, enriched: ranked };
 }
 
-function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan }) {
+function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan, extraSource = null }) {
   const { scanned, enriched } = scan;
   const missingPnl = enriched.some((signal) => signal.seven_day_pnl_usdt === null);
 
@@ -129,7 +178,7 @@ function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan }) {
   }
 
   return {
-    schema_version: '0.1',
+    schema_version: '0.2',
     service_id: serviceId,
     mode: 'live',
     generated_at: new Date().toISOString(),
@@ -145,38 +194,138 @@ function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan }) {
         condition_id: market.condition_id,
         title: market.title
       })),
-      min_trade_notional_usdt: MIN_TRADE_NOTIONAL_USDT
+      min_trade_notional_usdt: MIN_TRADE_NOTIONAL_USDT,
+      max_markets_scanned: MAX_MARKETS_SCANNED,
+      ...(extraSource && typeof extraSource === 'object' ? extraSource : {})
     }
   };
 }
 
+/** Map sport/league aliases → Gamma tag_slug candidates + search queries. */
+const SPORT_TAG_MAP = {
+  football: ['soccer', 'football', 'epl', 'premier-league', 'ucl', 'champions-league', 'la-liga', 'serie-a', 'bundesliga', 'mls'],
+  soccer: ['soccer', 'football', 'epl', 'ucl', 'la-liga', 'mls'],
+  tennis: ['tennis', 'atp', 'wta'],
+  nba: ['nba', 'basketball'],
+  basketball: ['nba', 'basketball'],
+  nfl: ['nfl', 'football'],
+  ufc: ['ufc', 'mma'],
+  mlb: ['mlb', 'baseball'],
+  baseball: ['mlb', 'baseball'],
+  world_cup: ['world-cup'],
+  worldcup: ['world-cup']
+};
+
+const LEAGUE_TAG_MAP = {
+  world_cup: ['world-cup'],
+  worldcup: ['world-cup'],
+  epl: ['epl', 'premier-league', 'soccer'],
+  ucl: ['ucl', 'champions-league', 'soccer'],
+  laliga: ['la-liga', 'soccer'],
+  'la-liga': ['la-liga', 'soccer'],
+  serie_a: ['serie-a', 'soccer'],
+  bundesliga: ['bundesliga', 'soccer'],
+  mls: ['mls', 'soccer'],
+  atp: ['tennis', 'atp'],
+  wta: ['tennis', 'wta'],
+  nba: ['nba'],
+  nfl: ['nfl'],
+  ufc: ['ufc'],
+  mlb: ['mlb']
+};
+
+function normalizeSportsScope(input = {}) {
+  const sport = normalizeText(input.sport ?? 'all') || 'all';
+  const league = normalizeText(input.league ?? '') || null;
+  const explicitTag = normalizeText(input.tag_slug ?? '') || null;
+  const query = normalizeText(
+    input.query ?? input.market ?? input.market_id ?? input.team ?? ''
+  );
+  const queryClean = query === 'all' ? '' : query;
+
+  const tags = [];
+  if (explicitTag) tags.push(explicitTag);
+  if (league && LEAGUE_TAG_MAP[league]) tags.push(...LEAGUE_TAG_MAP[league]);
+  if (sport && sport !== 'all' && SPORT_TAG_MAP[sport]) tags.push(...SPORT_TAG_MAP[sport]);
+
+  const uniqueTags = [...new Set(tags.filter(Boolean))];
+  const labelParts = [sport !== 'all' ? sport : null, league, explicitTag, queryClean].filter(Boolean);
+
+  return {
+    sport,
+    league,
+    tag_slug: uniqueTags[0] ?? null,
+    tag_candidates: uniqueTags,
+    query: queryClean,
+    label: labelParts.join('/') || 'sports_all'
+  };
+}
+
 /**
- * Find active World Cup markets via Gamma events; fall back to site-wide
- * top-volume markets when nothing matches.
- * Exported (as resolveWorldCupMarkets) for the World Cup Upset Alert service.
+ * Sports / category market discovery: try Gamma tag_slug candidates, then
+ * public-search with sport/league/query, then top-volume fallback.
  */
-async function resolveMarkets(fetchImpl, marketHint) {
+export async function resolveSportsMarkets(fetchImpl, scopeInput) {
+  const scope = typeof scopeInput === 'string'
+    ? normalizeSportsScope({ query: scopeInput })
+    : (scopeInput?.label && scopeInput.tag_candidates
+      ? scopeInput
+      : normalizeSportsScope(scopeInput ?? {}));
+
+  const discovery = { tried_tags: [], search_terms: [], method: null };
   let markets = [];
-  try {
-    const events = await fetchJson(
-      fetchImpl,
-      `${GAMMA_BASE}/events?closed=false&active=true&limit=25&order=volume24hr&ascending=false&tag_slug=world-cup`
-    );
-    markets = flattenEventMarkets(Array.isArray(events) ? events : []);
-  } catch {
-    markets = [];
+
+  for (const tag of scope.tag_candidates) {
+    discovery.tried_tags.push(tag);
+    try {
+      const events = await fetchJson(
+        fetchImpl,
+        `${GAMMA_BASE}/events?closed=false&active=true&limit=25&order=volume24hr&ascending=false&tag_slug=${encodeURIComponent(tag)}`
+      );
+      markets = flattenEventMarkets(Array.isArray(events) ? events : []);
+      if (markets.length) {
+        discovery.method = `tag_slug:${tag}`;
+        break;
+      }
+    } catch {
+      // try next tag
+    }
   }
 
-  if (marketHint && marketHint !== 'all') {
+  if (scope.query && markets.length) {
     const filtered = markets.filter((market) =>
-      normalizeText(`${market.market_id} ${market.title} ${market.event_title} ${market.slug}`).includes(marketHint));
+      normalizeText(`${market.market_id} ${market.title} ${market.event_title} ${market.slug}`).includes(scope.query));
     if (filtered.length) {
-      return { markets: filtered, usedFallback: false };
+      return { markets: filtered, usedFallback: false, discovery };
     }
   }
 
   if (markets.length) {
-    return { markets, usedFallback: false };
+    return { markets, usedFallback: false, discovery };
+  }
+
+  const searchTerms = [
+    scope.query,
+    scope.league,
+    scope.sport !== 'all' ? scope.sport : null,
+    scope.tag_slug
+  ].filter(Boolean);
+
+  for (const term of searchTerms) {
+    discovery.search_terms.push(term);
+    try {
+      const result = await fetchJson(
+        fetchImpl,
+        `${GAMMA_BASE}/public-search?q=${encodeURIComponent(term)}&events_status=active&limit_per_type=10`
+      );
+      markets = flattenEventMarkets(Array.isArray(result?.events) ? result.events : []);
+      if (markets.length) {
+        discovery.method = `public-search:${term}`;
+        return { markets, usedFallback: false, discovery };
+      }
+    } catch {
+      // next term
+    }
   }
 
   const fallback = await fetchJson(
@@ -186,7 +335,23 @@ async function resolveMarkets(fetchImpl, marketHint) {
   const fallbackMarkets = (Array.isArray(fallback) ? fallback : [])
     .filter((market) => market.conditionId && market.enableOrderBook !== false)
     .map((market) => normalizeMarket(market, market.question ?? market.slug ?? ''));
-  return { markets: fallbackMarkets, usedFallback: true };
+  discovery.method = 'top_volume_fallback';
+  return { markets: fallbackMarkets, usedFallback: true, discovery };
+}
+
+/**
+ * Find active World Cup markets via Gamma events; fall back to site-wide
+ * top-volume markets when nothing matches.
+ * Exported (as resolveWorldCupMarkets) for the World Cup Upset Alert service.
+ */
+async function resolveMarkets(fetchImpl, marketHint) {
+  const resolved = await resolveSportsMarkets(fetchImpl, {
+    sport: 'football',
+    league: 'world_cup',
+    tag_slug: 'world-cup',
+    query: marketHint === 'all' ? '' : marketHint
+  });
+  return { markets: resolved.markets, usedFallback: resolved.usedFallback };
 }
 
 /**
@@ -347,6 +512,21 @@ async function fetchPosition(fetchImpl, wallet, conditionId) {
 function buildSignal(entry, sevenDayPnl, position) {
   const action = classifyAction(entry, position);
   const notional = round2(Math.max(entry.buy_notional, entry.sell_notional));
+  const noiseFlags = [];
+  const lastPrice = entry.last_price;
+  if (Number.isFinite(lastPrice) && (lastPrice <= NEAR_SETTLED_PRICE_LOW || lastPrice >= NEAR_SETTLED_PRICE_HIGH)) {
+    noiseFlags.push('near_settled_noise');
+  }
+
+  let confidence = scoreConfidence(entry, sevenDayPnl);
+  if (noiseFlags.includes('near_settled_noise')) {
+    confidence = round2(Math.min(confidence, 0.45));
+  }
+
+  const rationale = buildRationale(entry, action, sevenDayPnl, position)
+    + (noiseFlags.includes('near_settled_noise')
+      ? ' Flagged near_settled_noise: last price is extreme; often settlement/lock-in flow, not a fresh thesis.'
+      : '');
 
   return {
     market_id: entry.market_id,
@@ -358,9 +538,19 @@ function buildSignal(entry, sevenDayPnl, position) {
     notional_usdt: notional,
     last_trade_price: entry.last_price,
     seven_day_pnl_usdt: sevenDayPnl,
-    confidence: scoreConfidence(entry, sevenDayPnl),
-    rationale: buildRationale(entry, action, sevenDayPnl, position)
+    confidence,
+    noise_flags: noiseFlags,
+    rationale
   };
+}
+
+function rankSignalsPreferClean(signals) {
+  return signals.slice().sort((a, b) => {
+    const aNoise = (a.noise_flags || []).includes('near_settled_noise') ? 1 : 0;
+    const bNoise = (b.noise_flags || []).includes('near_settled_noise') ? 1 : 0;
+    if (aNoise !== bNoise) return aNoise - bNoise;
+    return (b.confidence || 0) - (a.confidence || 0);
+  });
 }
 
 function classifyAction(entry, position) {

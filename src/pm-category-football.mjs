@@ -1,0 +1,607 @@
+// Football match category plugin (L1) for PM Event Readout.
+// Aligns to pm-football-match skill (exportable parts only).
+// Quality bar: research/2026-07-09-hackathon-quality-bar.md
+// No Leo bankroll/sizing/orders. Fixture must be honest.
+
+import { round2 } from './pm-gamma-market.mjs';
+
+const REQUIRED_GROUPS = [
+  'moneyline_90m',
+  'totals_ladder',
+  'spreads_ladder',
+  'btts',
+  'team_totals'
+];
+
+/**
+ * @param {object} args
+ * @param {object} args.market
+ * @param {object|null} args.eventBundle  may include sibling_event_slugs
+ * @param {object[]} args.eventMatrix
+ * @param {object} [args.fixture] caller-provided verification
+ */
+export function enrichFootballCategory({ market, eventBundle, eventMatrix, fixture = null }) {
+  const classified = (eventMatrix || []).map((row) => ({
+    ...row,
+    market_group: classifyFootballGroup(row)
+  }));
+
+  const groups = groupBy(classified, (row) => row.market_group);
+  const missing = [];
+  for (const key of REQUIRED_GROUPS) {
+    if (!groups[key]?.length) missing.push(key);
+  }
+
+  // Knockout often has advance on sibling — note if absent
+  if (!groups.advance?.length) missing.push('advance_or_match_winner_optional');
+
+  const matrix_status = missing.filter((m) => !m.endsWith('_optional')).length
+    ? 'incomplete'
+    : 'complete';
+
+  const moneyline = summarizeMoneyline(groups.moneyline_90m || []);
+  const totals = summarizeLadder(groups.totals_ladder || [], 'totals');
+  const spreads = summarizeLadder(groups.spreads_ladder || [], 'spreads');
+  const btts = firstYes(groups.btts);
+  const advance = firstYes(groups.advance);
+  const teamTotals = summarizeTeamTotals(groups.team_totals || []);
+
+  const fixtureGate = evaluateFixtureGate(market, eventBundle, fixture);
+  const shape = buildImpliedShape({ moneyline, totals, spreads, btts, advance, teamTotals });
+  const expressions = buildExpressionComparison({ moneyline, totals, spreads, btts, advance, shape });
+
+  let tradability_cap = null;
+  const tradability_reasons = [];
+  if (fixtureGate.fixture_status !== 'ok') {
+    tradability_cap = 'weak';
+    tradability_reasons.push('fixture_unverified_or_failed');
+  }
+  if (matrix_status === 'incomplete') {
+    tradability_cap = tradability_cap || 'medium';
+    tradability_reasons.push('football_matrix_incomplete');
+  }
+
+  const default_action_hint = fixtureGate.fixture_status !== 'ok' || matrix_status === 'incomplete'
+    ? 'no_trade'
+    : 'use_decision_card_after_expression_comparison';
+
+  // Full dump of player_props (often 200+) blows payload; keep count + sample.
+  const SURFACE_FULL = new Set([
+    'moneyline_90m', 'totals_ladder', 'spreads_ladder', 'btts', 'team_totals',
+    'advance', 'first_half', 'second_half', 'extra_time', 'penalty_shootout',
+    'exact_score', 'corners', 'first_to_score'
+  ]);
+  const market_surface = {};
+  for (const [key, rows] of Object.entries(groups)) {
+    if (SURFACE_FULL.has(key)) {
+      market_surface[key] = rows.map(compactRow);
+    } else if (key === 'player_props') {
+      market_surface.player_props_sample = rows.slice(0, 8).map(compactRow);
+    } else {
+      market_surface[key] = rows.slice(0, 12).map(compactRow);
+    }
+  }
+
+  return {
+    category: 'football',
+    category_depth: 'enriched',
+    primary_event_slug: eventBundle?.primary_event_slug || eventBundle?.slug || null,
+    sibling_event_slugs: eventBundle?.sibling_event_slugs || [],
+    linked_event_count: eventBundle?.linked_event_count
+      ?? (1 + (eventBundle?.sibling_event_slugs?.length || 0)),
+    discovery: eventBundle?.discovery || null,
+    related_market_count: classified.length,
+    group_counts: Object.fromEntries(
+      Object.entries(groups).map(([key, rows]) => [key, rows.length])
+    ),
+    matrix_status,
+    missing_market_groups: missing,
+    market_surface,
+    market_implied_shape: shape,
+    fixture: fixtureGate,
+    expression_comparison: expressions,
+    recommended_expression: expressions.recommended || null,
+    default_action_hint,
+    tradability_cap,
+    tradability_reasons,
+    central_thesis: shape.central_thesis,
+    coherence: buildFootballCoherence({ moneyline, totals, spreads, btts, shape, matrix_status }),
+    hard_gate: 'no_orders_no_account_mutation_no_leo_bankroll',
+    skill_alignment: {
+      source: 'pm-football-match',
+      included: [
+        'fixture_gate',
+        'full_same_event_matrix_via_parent_event_id',
+        'missing_market_groups',
+        'market_implied_shape',
+        'expression_comparison',
+        'adjacent_ladder_context',
+        'thesis_expression_coherence',
+        'heuristic_coherence_and_top_scorelines'
+      ],
+      excluded_local_only: [
+        'bankroll_pct',
+        'u_amount_from_latest_anchor',
+        'playbook_card_writeback',
+        'personal_exposure',
+        'full_player_props_dump',
+        'full_joint_poisson_engine'
+      ]
+    }
+  };
+}
+
+function buildFootballCoherence({ moneyline, totals, spreads, btts, shape, matrix_status }) {
+  const residuals = [];
+  const top_scorelines = [];
+
+  const home = moneyline?.home?.yes ?? null;
+  const draw = moneyline?.draw?.yes ?? null;
+  const away = moneyline?.away?.yes ?? null;
+  const over25 = totals?.lines?.find((x) => Number(x.line) === 2.5)?.yes
+    ?? totals?.pivot?.yes
+    ?? null;
+  const bttsYes = btts?.yes ?? null;
+
+  if (home != null && away != null && home < 0.35 && away < 0.35 && draw != null && draw > 0.3) {
+    residuals.push({
+      type: 'ml_draw_heavy',
+      note: 'Both sides short-priced with elevated draw — check if totals/spreads agree.'
+    });
+  }
+  if (over25 != null && over25 > 0.62 && home != null && away != null && Math.max(home, away) < 0.4) {
+    residuals.push({
+      type: 'totals_vs_ml_tension',
+      note: 'Market prices high Over 2.5 while ML looks tight — possible expression conflict.'
+    });
+  }
+  if (bttsYes != null && over25 != null && bttsYes > 0.6 && over25 < 0.45) {
+    residuals.push({
+      type: 'btts_vs_totals_tension',
+      note: 'BTTS Yes rich vs subdued Over — review ladder consistency.'
+    });
+  }
+
+  // Illustrative scoreline ranks from crude ML weights (not calibrated Poisson).
+  const weights = [
+    { scoreline: '1-0', w: home != null ? Math.max(0.01, home) * 0.55 : 0.1 },
+    { scoreline: '2-1', w: home != null ? Math.max(0.01, home) * 0.35 : 0.08 },
+    { scoreline: '0-0', w: draw != null ? draw * 0.55 : 0.1 },
+    { scoreline: '1-1', w: draw != null ? draw * 0.45 : 0.1 },
+    { scoreline: '0-1', w: away != null ? Math.max(0.01, away) * 0.55 : 0.1 },
+    { scoreline: '1-2', w: away != null ? Math.max(0.01, away) * 0.35 : 0.08 }
+  ];
+  const sum = weights.reduce((a, b) => a + b.w, 0) || 1;
+  for (const row of weights.sort((a, b) => b.w - a.w).slice(0, 5)) {
+    top_scorelines.push({
+      scoreline: row.scoreline,
+      approx_mass: round2(row.w / sum),
+      method: 'heuristic_ml_weights_not_poisson'
+    });
+  }
+
+  const coherence_status = residuals.length
+    ? 'tension'
+    : (matrix_status === 'complete' ? 'ok_heuristic' : 'incomplete_matrix');
+
+  return {
+    coherence_status,
+    cross_market_residuals: residuals,
+    top_scorelines,
+    distribution_note: 'Not a full joint_score_distribution_90m; use as triage only.',
+    market_implied_shape_ref: shape?.central_thesis ?? null,
+    spreads_present: Boolean(spreads?.count || spreads?.lines?.length)
+  };
+}
+
+export function extractFootballFixture(input = {}, options = {}) {
+  if (options.footballFixture && typeof options.footballFixture === 'object') {
+    return options.footballFixture;
+  }
+  const raw = input.football && typeof input.football === 'object'
+    ? input.football
+    : (input.fixture && typeof input.fixture === 'object' ? input.fixture : null);
+  if (!raw) return null;
+  return {
+    requested_window: raw.requested_window ?? raw.window ?? null,
+    scheduled_time_utc: raw.scheduled_time_utc ?? raw.kickoff_utc ?? raw.start_time ?? null,
+    scheduled_time_beijing: raw.scheduled_time_beijing ?? null,
+    fixture_sources: Array.isArray(raw.fixture_sources) ? raw.fixture_sources : (raw.fixture_sources ? [raw.fixture_sources] : []),
+    market_fixture_match: raw.market_fixture_match ?? raw.match ?? null,
+    home_team: raw.home_team ?? raw.home ?? null,
+    away_team: raw.away_team ?? raw.away ?? null,
+    competition: raw.competition ?? null,
+    verified: raw.verified === true
+  };
+}
+
+export function classifyFootballGroup(row) {
+  const st = String(row.sports_market_type || '').toLowerCase();
+  const gt = String(row.group_item_title || '').trim();
+  const text = `${gt} ${row.title || ''} ${row.slug || ''}`.toLowerCase();
+
+  if (st.includes('team_to_advance') || /team to advance/.test(text)) return 'advance';
+  if (st.includes('both_teams_to_score') || /\bbtts\b|both teams to score/.test(text)) return 'btts';
+  if (st.includes('extra_time') || /extra time/.test(text)) return 'extra_time';
+  if (st.includes('penalty') || /penalty shootout/.test(text)) return 'penalty_shootout';
+  if (st.includes('exact_score') || /exact score|correct score/.test(text)) return 'exact_score';
+  if (st.includes('corner') || /corner/.test(text)) return 'corners';
+  if (st.includes('first_to_score') || /first to score|first goal/.test(text)) return 'first_to_score';
+  if (st.includes('player_') || /player prop|anytime goalscorer|shots on target/.test(text)) {
+    return 'player_props';
+  }
+  if (st.includes('first_half') || /1st half|first half|halftime/.test(text)) return 'first_half';
+  if (st.includes('second_half') || /2nd half|second half/.test(text)) return 'second_half';
+
+  // Team totals: sportsMarketType or "France O/U 1.5" (not bare "O/U 1.5")
+  if (st.includes('team_total') || st === 'soccer_team_totals') return 'team_totals';
+  if (/o\/u|over\/under/.test(gt) && !/^[ou]\/u\s*\d/i.test(gt) && !/^over\/under\s*\d/i.test(gt)) {
+    return 'team_totals';
+  }
+
+  if (st.includes('spread') || /spread|handicap|\(-?\d/.test(text)) return 'spreads_ladder';
+
+  // Match totals: bare O/U lines
+  if (st === 'totals' || /^[ou]\/u\s*\d/i.test(gt) || /^over\/under\s*\d/i.test(gt)) {
+    return 'totals_ladder';
+  }
+  if (/o\/u|over\/under|total/.test(text) && !/team total|1st half|2nd half|first half|second half/.test(text)) {
+    return 'totals_ladder';
+  }
+
+  if (st === 'moneyline' || /moneyline/.test(st) || (/\bdraw\b/.test(text) && /vs\.|vs /.test(text))) {
+    return 'moneyline_90m';
+  }
+
+  return 'other';
+}
+
+function evaluateFixtureGate(market, eventBundle, fixture) {
+  const gammaStart = eventBundle?.start_time || market?.start_time || null;
+  const gammaEnd = eventBundle?.end_date || market?.end_date || null;
+
+  if (fixture?.verified === true && fixture.market_fixture_match === 'yes') {
+    return {
+      fixture_status: 'ok',
+      market_fixture_match: 'yes',
+      scheduled_time_utc: fixture.scheduled_time_utc || gammaStart,
+      scheduled_time_beijing: fixture.scheduled_time_beijing,
+      fixture_sources: fixture.fixture_sources?.length
+        ? fixture.fixture_sources
+        : ['caller_verified'],
+      note: 'Caller marked fixture verified and matching the market.'
+    };
+  }
+
+  if (fixture?.market_fixture_match === 'no') {
+    return {
+      fixture_status: 'failed_or_unverified',
+      market_fixture_match: 'no',
+      scheduled_time_utc: fixture.scheduled_time_utc || gammaStart,
+      fixture_sources: fixture.fixture_sources || [],
+      note: 'Caller reports market/fixture mismatch — no_trade.'
+    };
+  }
+
+  // Without independent verification, Gamma kickoff alone is weak evidence.
+  if (gammaStart) {
+    return {
+      fixture_status: 'unverified',
+      market_fixture_match: 'unclear',
+      scheduled_time_utc: gammaStart,
+      scheduled_time_end_or_resolve: gammaEnd,
+      fixture_sources: ['polymarket_gamma_startTime'],
+      note: 'Gamma startTime present but not independently verified. Pass football.verified=true + sources for fixture_status=ok.'
+    };
+  }
+
+  return {
+    fixture_status: 'failed_or_unverified',
+    market_fixture_match: 'unclear',
+    scheduled_time_utc: null,
+    fixture_sources: [],
+    note: 'No kickoff on Gamma and no caller verification — stop per pm-football-match fixture gate.'
+  };
+}
+
+function summarizeMoneyline(rows) {
+  const out = { home: null, draw: null, away: null, raw: rows.map(compactRow) };
+  for (const row of rows) {
+    const label = `${row.group_item_title || ''} ${row.title || ''}`.toLowerCase();
+    const item = { label: row.group_item_title || row.title, yes: row.yes, slug: row.slug, ask: row.best_ask };
+    if (/\bdraw\b/.test(label)) out.draw = item;
+    else if (!out.home) out.home = item;
+    else out.away = item;
+  }
+  // If three moneylines without clear draw tag, keep order by matrix
+  if (!out.draw && rows.length >= 3) {
+    out.home = { label: rows[0].group_item_title || rows[0].title, yes: rows[0].yes, slug: rows[0].slug, ask: rows[0].best_ask };
+    out.draw = { label: rows[1].group_item_title || rows[1].title, yes: rows[1].yes, slug: rows[1].slug, ask: rows[1].best_ask };
+    out.away = { label: rows[2].group_item_title || rows[2].title, yes: rows[2].yes, slug: rows[2].slug, ask: rows[2].best_ask };
+  }
+  return out;
+}
+
+function summarizeLadder(rows, kind) {
+  const lines = rows
+    .map((row) => {
+      const line = extractLineNumber(`${row.group_item_title || ''} ${row.title || ''} ${row.slug || ''}`);
+      return {
+        label: row.group_item_title || row.title,
+        line,
+        yes: row.yes,
+        ask: row.best_ask,
+        slug: row.slug
+      };
+    })
+    .filter((r) => r.yes !== null)
+    .sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
+
+  const nearCoin = lines
+    .filter((l) => l.yes >= 0.35 && l.yes <= 0.65)
+    .sort((a, b) => Math.abs(0.5 - a.yes) - Math.abs(0.5 - b.yes))[0] ?? null;
+
+  return { kind, lines, pivot: nearCoin, count: lines.length };
+}
+
+function summarizeTeamTotals(rows) {
+  return rows.map((row) => ({
+    label: row.group_item_title || row.title,
+    yes: row.yes,
+    ask: row.best_ask,
+    slug: row.slug,
+    line: extractLineNumber(`${row.group_item_title || ''} ${row.slug || ''}`)
+  }));
+}
+
+function buildImpliedShape({ moneyline, totals, spreads, btts, advance, teamTotals }) {
+  const homeYes = moneyline.home?.yes;
+  const drawYes = moneyline.draw?.yes;
+  const awayYes = moneyline.away?.yes;
+  const fav = pickFavorite(moneyline);
+  const ou25 = totals.lines.find((l) => l.line === 2.5) || totals.pivot;
+  const spread15 = spreads.lines.find((l) => Math.abs((l.line ?? 0) - 1.5) < 0.01);
+
+  const states = [];
+  if (fav && homeYes !== null && homeYes >= 0.55) {
+    states.push('favorite_leans_90m_win');
+  }
+  if (drawYes !== null && drawYes >= 0.22) {
+    states.push('draw_has_material_mass');
+  }
+  if (ou25 && ou25.yes >= 0.55) states.push('market_leans_open_game_over_2pt5');
+  if (ou25 && ou25.yes <= 0.45) states.push('market_leans_tight_under_2pt5');
+  if (btts?.yes >= 0.55) states.push('btts_likely');
+  if (btts?.yes <= 0.45) states.push('btts_unlikely');
+  if (spread15 && fav && spread15.yes < (fav.yes ?? 1) - 0.15) {
+    states.push('favorite_win_but_margin_not_fully_priced');
+  }
+  if (advance?.yes != null && fav?.yes != null && advance.yes > fav.yes + 0.08) {
+    states.push('advance_richer_than_90m_ml_knockout_variance');
+  }
+
+  let central_thesis = 'Insufficient structure for a sharp state map.';
+  if (states.includes('favorite_leans_90m_win') && states.includes('market_leans_tight_under_2pt5')) {
+    central_thesis = 'Favorite favored in 90m with a relatively tight totals regime — prefer expressions that do not require a blowout.';
+  } else if (states.includes('favorite_leans_90m_win') && states.includes('market_leans_open_game_over_2pt5')) {
+    central_thesis = 'Favorite favored with an open-game totals lean — ML / team totals / overs may share the same path; compare prices.';
+  } else if (states.includes('draw_has_material_mass')) {
+    central_thesis = 'Draw carries material probability — favorite ML is not a free lunch; check spreads and unders.';
+  } else if (fav) {
+    central_thesis = `Market favorite leans ${fav.label} in 90m (Yes≈${fav.yes}). Compare advance/spreads/totals before choosing expression.`;
+  }
+
+  return {
+    moneyline: {
+      home: moneyline.home,
+      draw: moneyline.draw,
+      away: moneyline.away
+    },
+    totals_pivot: ou25,
+    spreads_note: spread15 || spreads.pivot,
+    btts,
+    advance,
+    team_totals_sample: teamTotals.slice(0, 6),
+    state_flags: states,
+    central_thesis
+  };
+}
+
+function buildExpressionComparison({ moneyline, totals, spreads, btts, advance, shape }) {
+  const candidates = [];
+  if (moneyline.home) {
+    candidates.push({
+      expression: 'home_90m_ml',
+      market: moneyline.home.label,
+      slug: moneyline.home.slug,
+      yes: moneyline.home.yes,
+      ask: moneyline.home.ask,
+      path: 'Needs home win in 90 minutes.',
+      why_consider: 'Direct 90m result expression.',
+      why_not: 'Ignores knockout advance paths; can be expensive vs advance.',
+      aligns_with_thesis: !shape.state_flags.includes('draw_has_material_mass')
+        || (moneyline.home.yes != null && moneyline.home.yes < 0.55)
+    });
+  }
+  if (moneyline.draw) {
+    candidates.push({
+      expression: 'draw_90m',
+      market: moneyline.draw.label,
+      slug: moneyline.draw.slug,
+      yes: moneyline.draw.yes,
+      ask: moneyline.draw.ask,
+      path: 'Needs 90m draw.',
+      why_consider: 'Prices tactical/tight-game thesis.',
+      why_not: 'Binary on draw; no margin for favorite win.',
+      aligns_with_thesis: shape.state_flags.includes('draw_has_material_mass')
+        || shape.state_flags.includes('market_leans_tight_under_2pt5')
+    });
+  }
+  if (advance) {
+    candidates.push({
+      expression: 'team_to_advance',
+      market: advance.label || 'Team to Advance',
+      slug: advance.slug,
+      yes: advance.yes,
+      ask: advance.ask,
+      path: 'Needs side to win tie (may include ET/PEN).',
+      why_consider: 'Wider path than 90m ML in knockout.',
+      why_not: 'Often richer/more expensive than 90m ML; wrong pick when thesis is tight/draw-heavy.',
+      aligns_with_thesis: shape.state_flags.includes('advance_richer_than_90m_ml_knockout_variance')
+        && !shape.state_flags.includes('draw_has_material_mass')
+    });
+  }
+  const ou = shape.totals_pivot;
+  if (ou) {
+    candidates.push({
+      expression: 'totals_pivot',
+      market: ou.label,
+      slug: ou.slug,
+      yes: ou.yes,
+      ask: ou.ask,
+      path: 'Needs goals relative to the pivot line (check adjacent O/U).',
+      why_consider: 'Expresses open vs tight game without picking a winner.',
+      why_not: 'Must compare adjacent ladder lines — single O/U is incomplete alone.',
+      aligns_with_thesis: shape.state_flags.includes('market_leans_tight_under_2pt5')
+        || shape.state_flags.includes('market_leans_open_game_over_2pt5')
+        || shape.state_flags.includes('draw_has_material_mass')
+    });
+  }
+  if (btts) {
+    candidates.push({
+      expression: 'btts',
+      market: btts.label || 'BTTS',
+      slug: btts.slug,
+      yes: btts.yes,
+      ask: btts.ask,
+      path: 'Both teams score.',
+      why_consider: 'Aligns with open-game / both-attacks thesis.',
+      why_not: 'Orthogonal to pure favorite-win thesis.',
+      aligns_with_thesis: shape.state_flags.includes('btts_likely')
+        || shape.state_flags.includes('market_leans_open_game_over_2pt5')
+    });
+  }
+
+  const ladder_context = buildAdjacentLadderContext(totals, spreads);
+
+  // Consistency gate (pm-football-match): central_thesis → shape → expression must cohere.
+  // Prefer expressions that align with the dominant thesis; never pick advance when draw mass is the story.
+  let recommended = null;
+  const flags = shape.state_flags || [];
+  if (flags.includes('draw_has_material_mass')) {
+    recommended = candidates.find((c) => c.expression === 'draw_90m')
+      || candidates.find((c) => c.expression === 'totals_pivot')
+      || null;
+  } else if (flags.includes('market_leans_tight_under_2pt5') && ou) {
+    recommended = candidates.find((c) => c.expression === 'totals_pivot') || null;
+  } else if (flags.includes('advance_richer_than_90m_ml_knockout_variance') && advance) {
+    recommended = candidates.find((c) => c.expression === 'team_to_advance') || null;
+  } else if (flags.includes('market_leans_open_game_over_2pt5') && (ou || btts)) {
+    recommended = candidates.find((c) => c.expression === 'totals_pivot')
+      || candidates.find((c) => c.expression === 'btts')
+      || null;
+  } else if (moneyline.home) {
+    recommended = candidates.find((c) => c.expression === 'home_90m_ml') || null;
+  }
+
+  const coherence_ok = !recommended
+    || recommended.aligns_with_thesis !== false
+    || !flags.includes('draw_has_material_mass')
+    || recommended.expression === 'draw_90m'
+    || recommended.expression === 'totals_pivot';
+
+  if (!coherence_ok) {
+    recommended = candidates.find((c) => c.expression === 'draw_90m')
+      || candidates.find((c) => c.expression === 'totals_pivot')
+      || null;
+  }
+
+  return {
+    candidates,
+    ladder_context,
+    recommended: recommended
+      ? {
+          ...recommended,
+          note: 'Heuristic expression pick from market shape only — not a buy tip; run decision-card for price_status/edge.',
+          coherence_with_thesis: true
+        }
+      : null,
+    rule: 'Always compare ≥2 expressions; never recommend a total/handicap without adjacent ladder context; thesis and recommended expression must cohere.'
+  };
+}
+
+function buildAdjacentLadderContext(totals, spreads) {
+  const totalsLines = (totals?.lines || []).slice().sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
+  const spreadLines = (spreads?.lines || []).slice().sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
+  const pivot = totals?.pivot || null;
+  const adjacentTotals = pivot
+    ? totalsLines.filter((l) => l.line != null && Math.abs(l.line - (pivot.line ?? 2.5)) <= 1.01)
+    : totalsLines.slice(0, 5);
+
+  return {
+    totals_ladder_count: totalsLines.length,
+    spreads_ladder_count: spreadLines.length,
+    totals_adjacent_to_pivot: adjacentTotals.map((l) => ({
+      label: l.label,
+      line: l.line,
+      yes: l.yes,
+      ask: l.ask,
+      slug: l.slug
+    })),
+    spreads_sample: spreadLines.slice(0, 6).map((l) => ({
+      label: l.label,
+      line: l.line,
+      yes: l.yes,
+      ask: l.ask,
+      slug: l.slug
+    })),
+    note: totalsLines.length < 2
+      ? 'Totals ladder thin — do not treat a single O/U as sufficient.'
+      : 'Compare adjacent O/U and spread lines before locking an interval expression.'
+  };
+}
+
+function pickFavorite(moneyline) {
+  const sides = [moneyline.home, moneyline.away].filter(Boolean);
+  if (!sides.length) return null;
+  return sides.slice().sort((a, b) => (b.yes ?? 0) - (a.yes ?? 0))[0];
+}
+
+function firstYes(rows) {
+  if (!rows?.length) return null;
+  const row = rows[0];
+  return { label: row.group_item_title || row.title, yes: row.yes, ask: row.best_ask, slug: row.slug };
+}
+
+function extractLineNumber(text) {
+  const m = String(text).match(/(-?\d+(?:\.\d+)?)\s*(?:pt)?/i) || String(text).match(/([OU])\s*(\d+(?:\.\d+)?)/i);
+  if (!m) return null;
+  if (m[2] && (m[1] === 'O' || m[1] === 'U')) return Number(m[2]);
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function compactRow(row) {
+  return {
+    slug: row.slug,
+    title: row.title,
+    group_item_title: row.group_item_title,
+    sports_market_type: row.sports_market_type,
+    market_group: row.market_group,
+    yes: row.yes,
+    best_ask: row.best_ask,
+    best_bid: row.best_bid,
+    volume_24h_usd: row.volume_24h_usd,
+    is_primary: row.is_primary
+  };
+}
+
+function groupBy(items, fn) {
+  const out = {};
+  for (const item of items) {
+    const key = fn(item) || 'other';
+    if (!out[key]) out[key] = [];
+    out[key].push(item);
+  }
+  return out;
+}

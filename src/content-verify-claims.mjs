@@ -48,7 +48,7 @@ export function assessContentVerifyClaims(input = {}) {
       source_count: sources.length
     },
     verdict,
-    consensus: buildConsensus(verdict, supported, unsupported),
+    consensus: buildConsensus(verdict, supported, unsupported, needs_review),
     supported,
     unsupported,
     needs_review,
@@ -172,7 +172,7 @@ function verdictFrom(supported, unsupported, needs_review, conflicts) {
   return 'pass';
 }
 
-function buildConsensus(verdict, supported, unsupported) {
+function buildConsensus(verdict, supported, unsupported, needs_review = []) {
   if (verdict === 'pass') {
     return `All ${supported.length} claim(s) overlap supplied source excerpts above threshold.`;
   }

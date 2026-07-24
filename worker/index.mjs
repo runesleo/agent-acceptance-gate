@@ -1,7 +1,8 @@
 import { assessWorldCupSmartMoney } from '../src/worldcup-smart-money.mjs';
 import {
   assessPolymarketSmartMoneyLive,
-  assessWorldCupSmartMoneyLive
+  assessWorldCupSmartMoneyLive,
+  assessSportsSmartMoneyLive
 } from '../src/worldcup-smart-money-live.mjs';
 import {
   assessOkxAiDataService,
@@ -18,8 +19,14 @@ import {
 } from '../src/crypto-market-regime.mjs';
 import {
   assessWorldCupUpsetAlertLive,
-  buildWorldCupUpsetAlertFallback
+  buildWorldCupUpsetAlertFallback,
+  assessSportsUpsetAlertLive,
+  buildSportsUpsetAlertFallback
 } from '../src/world-cup-upset-alert.mjs';
+import {
+  assessPmProfileLive,
+  buildPmProfileFallback
+} from '../src/pm-profile.mjs';
 import {
   assessTokenDdVerdictLive,
   buildTokenDdVerdictFallback
@@ -35,6 +42,10 @@ import {
 import {
   assessContentVerifyClaims
 } from '../src/content-verify-claims.mjs';
+import {
+  assessContentSlopCheck,
+  buildContentSlopCheckFallback
+} from '../src/content-slop-check.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
@@ -57,11 +68,15 @@ const JSON_HEADERS = {
 // Paid A2MCP endpoints (per-service x402 fee; optional one free trial per IP when X402_FREE_TRIAL=true).
 const PAID_RADAR_ROUTES = {
   '/world-cup-smart-money-radar': {
-    description: 'World Cup Smart Money Radar — tracks profitable World Cup prediction-market wallets and highlights position changes.',
+    description: 'World Cup Smart Money Radar (legacy alias) — sports-generic pipeline scoped to world_cup; prefer /sports-smart-money-radar for other leagues.',
     load: (payload) => worldCupRadarWithCache(payload)
   },
+  '/sports-smart-money-radar': {
+    description: 'Sports Smart Money Radar — profitable Polymarket wallet signals for football/tennis/NBA/NFL/UFC/MLB etc. Pass sport + optional league/query/tag_slug.',
+    load: (payload) => sportsSmartMoneyWithCache(payload)
+  },
   '/polymarket-smart-money-radar': {
-    description: 'Polymarket Smart Money Radar — tracks profitable Polymarket wallets and highlights position changes.',
+    description: 'Polymarket Smart Money Radar — site-wide or tag/event_type scoped wallet signals from large public trades.',
     load: (payload) => polymarketRadarWithCache(payload)
   },
   '/event-price-divergence-radar': {
@@ -73,8 +88,16 @@ const PAID_RADAR_ROUTES = {
     load: (payload) => cryptoMarketRegimeWithCache(payload)
   },
   '/world-cup-upset-alert': {
-    description: 'World Cup Upset Alert — flags profitable Polymarket wallets (7d PnL > 0) entering or adding to low-probability (<0.35) World Cup outcomes: potential upset positioning.',
+    description: 'World Cup Upset Alert (legacy alias) — prefer /sports-upset-alert for other competitions.',
     load: (payload) => worldCupUpsetAlertWithCache(payload)
+  },
+  '/sports-upset-alert': {
+    description: 'Sports Upset Alert — profitable wallets entering low-probability sports outcomes (football leagues, tennis, NBA, etc.).',
+    load: (payload) => sportsUpsetAlertWithCache(payload)
+  },
+  '/pm-profile': {
+    description: 'PM Profile — read-only Polymarket wallet snapshot (7d LB PnL + positions sample). Productized from polymarket-toolkit.',
+    load: (payload) => pmProfileWithCache(payload)
   },
   '/agent-delivery-acceptance-audit': {
     description: 'Agent Delivery Audit Gate — audits an agent task delivery (evidence, validation, hard gates) and returns pass / needs_review / fail with a buyer summary.',
@@ -82,20 +105,24 @@ const PAID_RADAR_ROUTES = {
     load: (payload) => runDeliveryAcceptanceAudit(payload)
   },
   '/token-dd-verdict': {
-    description: 'Token DD Verdict — Quick-tier rule-based token research gate with optional DexScreener liquidity scan for EVM contracts; returns avoid/watch/research/tiny_speculative/conviction buckets.',
+    description: 'Token DD Verdict — Standard-lite rule-based token research gate with optional DexScreener heuristics for EVM contracts.',
     load: (payload) => tokenDdVerdictWithCache(payload)
   },
   '/pm-trade-preflight': {
-    description: 'PM Trade Preflight — read-only eligible/watch/skip gate before a Polymarket order using public Gamma market metadata (liquidity, price zone, spread). eligible means mechanical checks passed, not a buy tip.',
+    description: 'PM Trade Preflight — read-only eligible/watch/skip gate + decision-card-lite fields before a Polymarket order.',
     load: (payload) => pmTradePreflightWithCache(payload)
   },
   '/pm-event-readout': {
-    description: 'PM Event Analyst — same-event matrix + honest tradability; Football L1 merges parent children (fixture gate, state map, expression comparison). Not a buy tip.',
+    description: 'PM Event Analyst — same-event matrix + honest tradability; Football/tennis/Musk plugins. Not World-Cup-only.',
     load: (payload) => pmEventReadoutWithCache(payload)
   },
   '/content-verify-claims': {
     description: 'Content Verify Claims — rule-based check that publish claims overlap caller-supplied source excerpts (numbers + keywords); returns pass, needs_review, or fail.',
     load: (payload) => runContentVerifyClaims(payload)
+  },
+  '/content-slop-check': {
+    description: 'Content Slop Check — rule-based AI-filler / spam-pattern detector for draft text; returns slop_score and flags. Not a rewrite service.',
+    load: (payload) => runContentSlopCheck(payload)
   }
 };
 
@@ -162,6 +189,14 @@ export default {
       }
 
       if (request.method === 'GET' && PAID_RADAR_ROUTES[url.pathname]) {
+        // Edge-cache public samples: each GET used to hit upstream data sources
+        // live, so an unauthenticated crawler could burn upstream API quota.
+        const sampleCache = globalThis.caches?.default;
+        const sampleCacheKey = new Request(`${url.origin}${url.pathname}`, { method: 'GET' });
+        if (sampleCache) {
+          const cachedSample = await sampleCache.match(sampleCacheKey);
+          if (cachedSample) return cachedSample;
+        }
         const route = PAID_RADAR_ROUTES[url.pathname];
         const meta = getServiceCatalogEntry(url.pathname);
         const sampleRequest = samplePayloadForPath(url.pathname);
@@ -183,7 +218,9 @@ export default {
             unpaid_post: 'HTTP 402 payment-required challenge'
           };
         }
-        return json(body);
+        const sampleResp = json(body, 200, { 'cache-control': 'public, max-age=600' });
+        if (sampleCache) await sampleCache.put(sampleCacheKey, sampleResp.clone());
+        return sampleResp;
       }
 
       if (request.method === 'POST' && PAID_RADAR_ROUTES[url.pathname]) {
@@ -256,9 +293,48 @@ async function worldCupRadarWithCache(payload) {
   const limit = Number.parseInt(payload?.limit, 10) || 5;
 
   return radarWithCache({
-    cacheKey: `${market}|${limit}`,
+    cacheKey: `wc|${market}|${limit}`,
     loadLive: () => assessWorldCupSmartMoneyLive(payload),
     loadFallback: () => assessWorldCupSmartMoney(payload)
+  });
+}
+
+async function sportsSmartMoneyWithCache(payload) {
+  const sport = String(payload?.sport ?? 'all').trim().toLowerCase();
+  const league = String(payload?.league ?? '').trim().toLowerCase();
+  const query = String(payload?.query ?? payload?.market ?? 'all').trim().toLowerCase();
+  const limit = Number.parseInt(payload?.limit, 10) || 5;
+
+  return radarWithCache({
+    cacheKey: `sports-sm|${sport}|${league}|${query}|${limit}`,
+    loadLive: () => assessSportsSmartMoneyLive(payload),
+    loadFallback: () => assessWorldCupSmartMoney(payload)
+  });
+}
+
+async function sportsUpsetAlertWithCache(payload) {
+  const sport = String(payload?.sport ?? 'all').trim().toLowerCase();
+  const league = String(payload?.league ?? '').trim().toLowerCase();
+  const query = String(payload?.query ?? payload?.market ?? 'all').trim().toLowerCase();
+  const limit = Number.parseInt(payload?.limit, 10) || 5;
+
+  return radarWithCache({
+    cacheKey: `sports-upset|${sport}|${league}|${query}|${limit}`,
+    loadLive: () => assessSportsUpsetAlertLive(payload),
+    loadFallback: () => buildSportsUpsetAlertFallback(payload)
+  });
+}
+
+async function pmProfileWithCache(payload) {
+  const key = String(payload?.address ?? payload?.wallet ?? payload?.username ?? payload?.query ?? '').trim().toLowerCase();
+  if (!key) {
+    throw new Error('pm-profile requires address or username.');
+  }
+
+  return radarWithCache({
+    cacheKey: `pm-profile|${key}`,
+    loadLive: () => assessPmProfileLive(payload),
+    loadFallback: () => buildPmProfileFallback(payload)
   });
 }
 
@@ -373,6 +449,15 @@ function runContentVerifyClaims(payload) {
   return assessContentVerifyClaims(payload);
 }
 
+function runContentSlopCheck(payload) {
+  try {
+    return assessContentSlopCheck(payload);
+  } catch (error) {
+    if (String(error?.message || error).includes('required')) throw error;
+    return buildContentSlopCheckFallback(payload);
+  }
+}
+
 // ---- Agent Delivery Audit Gate ---------------------------------------------
 // Accepts either the full auditor schema ({task, delivery, context}) or the
 // compact buyer shape {task, delivery_summary, artifacts, validation,
@@ -482,6 +567,11 @@ function samplePayloadForPath(pathname) {
     case '/world-cup-smart-money-radar':
     case '/world-cup-upset-alert':
       return { query: 'all', limit: 2 };
+    case '/sports-smart-money-radar':
+    case '/sports-upset-alert':
+      return { sport: 'football', league: 'epl', limit: 2 };
+    case '/pm-profile':
+      return { address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a' };
     case '/crypto-market-regime-radar':
       return { focus: 'bitcoin', limit: 2 };
     case '/token-dd-verdict':
@@ -504,6 +594,10 @@ function samplePayloadForPath(pathname) {
         sources: [{
           text: 'Marketplace scan on 2026-07-07: 358 unique ASPs and about 2982 cumulative soldCount.'
         }]
+      };
+    case '/content-slop-check':
+      return {
+        text: 'In today\'s digital landscape, it is crucial to delve into synergy and leverage robust holistic frameworks. As an AI, I am excited to underscore the importance of this game-changer.'
       };
     default:
       return { limit: 2 };

@@ -1,5 +1,6 @@
-// PM Trade Preflight (pm_trade_preflight) — read-only trade/watch/skip gate before
+// PM Trade Preflight (pm_trade_preflight) — read-only eligible/watch/skip gate before
 // a prediction-market order. Uses public Polymarket Gamma market metadata only.
+// `eligible` means mechanical checks passed — NOT a buy/sell tip and NOT order routing.
 
 import {
   fetchMarket,
@@ -35,9 +36,10 @@ export async function assessPmTradePreflightLive(input = {}, options = {}) {
   }
 
   const evaluation = evaluatePreflight(market, side, sizeUsd);
+  const decisionLite = buildDecisionCardLite(market, side, evaluation);
 
   return {
-    schema_version: '0.1',
+    schema_version: '0.2',
     service_id: SERVICE_ID,
     mode: 'live',
     generated_at: new Date().toISOString(),
@@ -63,6 +65,7 @@ export async function assessPmTradePreflightLive(input = {}, options = {}) {
     reasons: evaluation.reasons,
     risk_flags: evaluation.risk_flags,
     side_price: evaluation.side_price,
+    decision_card_lite: decisionLite,
     caveats: [...STANDARD_CAVEATS],
     next_gate: 'Leo_manual_order_approval_required',
     source: {
@@ -101,6 +104,14 @@ export function buildPmTradePreflightFallback(input = {}) {
     reasons: ['Live Polymarket lookup unavailable; demo preflight only.'],
     risk_flags: ['live_data_unavailable'],
     side_price: 0.42,
+    decision_card_lite: {
+      fair_prob_range: [0.35, 0.5],
+      max_entry: 0.45,
+      price_status: 'unknown_demo',
+      edge_after_fees_buffer: null,
+      best_alternative_market: null,
+      decision_mode: 'demo_only'
+    },
     caveats: [...STANDARD_CAVEATS, 'Demo mode: do not trade on this response.'],
     next_gate: 'Leo_manual_order_approval_required',
     source: { provider: 'static_fallback' }
@@ -110,7 +121,7 @@ export function buildPmTradePreflightFallback(input = {}) {
 function evaluatePreflight(market, side, sizeUsd) {
   const reasons = [];
   const risk_flags = [];
-  let action = 'trade';
+  let action = 'eligible';
   let confidence = 0.72;
 
   if (market.closed || !market.active) {
@@ -162,8 +173,8 @@ function evaluatePreflight(market, side, sizeUsd) {
     confidence -= 0.1;
   }
 
-  if (action === 'trade') {
-    reasons.push('Liquidity, price zone, and spread checks passed heuristic preflight.');
+  if (action === 'eligible') {
+    reasons.push('Liquidity, price zone, and spread checks passed heuristic preflight (eligible ≠ buy tip).');
   }
 
   return {
@@ -172,6 +183,55 @@ function evaluatePreflight(market, side, sizeUsd) {
     reasons,
     risk_flags,
     side_price: round2(sidePrice)
+  };
+}
+
+/**
+ * Decision-card-lite: mechanical fair band + entry ceiling from price/liquidity
+ * heuristics only. Not a full pm-decision-card (no account/exposure/sizing).
+ */
+function buildDecisionCardLite(market, side, evaluation) {
+  const sidePrice = evaluation.side_price;
+  if (sidePrice === null || sidePrice === undefined) {
+    return {
+      fair_prob_range: null,
+      max_entry: null,
+      price_status: 'missing_price',
+      edge_after_fees_buffer: null,
+      best_alternative_market: null,
+      decision_mode: evaluation.action
+    };
+  }
+
+  // Without an external model, treat a narrow band around mid as a "watch" fair zone,
+  // and require a small edge buffer before considering entry.
+  const halfBand = 0.04;
+  const feeBuffer = 0.02;
+  const fairLow = round2(clamp(sidePrice - halfBand, 0.01, 0.99));
+  const fairHigh = round2(clamp(sidePrice + halfBand, 0.01, 0.99));
+  const maxEntry = round2(clamp(sidePrice - feeBuffer, 0.01, 0.99));
+
+  let price_status = 'at_market';
+  if (evaluation.risk_flags.includes('extreme_implied_probability')) price_status = 'extreme_zone';
+  else if (evaluation.action === 'eligible') price_status = 'mechanically_ok_not_a_buy';
+  else if (evaluation.action === 'watch') price_status = 'watch_constraints';
+  else if (evaluation.action === 'skip') price_status = 'skip';
+
+  const otherOutcomes = (market.outcomes || [])
+    .map((name, idx) => ({
+      outcome: name,
+      price: market.outcome_prices?.[idx] ?? null
+    }))
+    .filter((row) => String(row.outcome).toLowerCase() !== normalizeSide(side));
+
+  return {
+    fair_prob_range: [fairLow, fairHigh],
+    max_entry: maxEntry,
+    price_status,
+    edge_after_fees_buffer: feeBuffer,
+    best_alternative_market: otherOutcomes[0] ?? null,
+    decision_mode: evaluation.action,
+    note: 'fair_prob_range is a mechanical band around the live price, not a model-implied fair value.'
   };
 }
 
