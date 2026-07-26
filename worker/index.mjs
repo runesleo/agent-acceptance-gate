@@ -89,6 +89,22 @@ import {
   assessPmDecisionCardLive,
   buildPmDecisionCardFallback
 } from '../src/pm-decision-card.mjs';
+import {
+  assessPmMarketScanLive,
+  buildPmMarketScanFallback
+} from '../src/pm-market-scan.mjs';
+import {
+  assessPmMarketHealthLive,
+  buildPmMarketHealthFallback
+} from '../src/pm-market-health.mjs';
+import {
+  assessPmWalletReportLive,
+  buildPmWalletReportFallback
+} from '../src/pm-wallet-report.mjs';
+import {
+  assessPmUpdownReadoutLive,
+  buildPmUpdownReadoutFallback
+} from '../src/pm-updown-readout.mjs';
 import { auditDelivery } from '../src/auditor.mjs';
 import { handlePaidRequest, isX402Enabled, X402_CORS_HEADERS } from './x402.mjs';
 import { getFeeAtomicForPath, getServiceCatalogEntry, LISTED_SERVICE_PATHS, SERVICE_CATALOG } from './service-catalog.mjs';
@@ -143,7 +159,7 @@ const PAID_RADAR_ROUTES = {
     load: (payload) => pmProfileWithCache(payload)
   },
   '/pm-pnl-audit': {
-    description: 'PM PnL Audit — quick trust gate comparing LB all-time profit, position cashPnL and activity hints. Full replay is stubbed.',
+    description: 'PM PnL Audit — quick LB vs position cashPnL, or mode=full Worker-safe cashflow replay with honest pagination_incomplete. Data only.',
     load: (payload) => pmPnlAuditWithCache(payload)
   },
   '/pm-brier': {
@@ -168,7 +184,7 @@ const PAID_RADAR_ROUTES = {
     load: (payload) => pmTradePreflightWithCache(payload)
   },
   '/pm-event-readout': {
-    description: 'PM Event Analyst — same-event matrix + honest tradability; Football/tennis/Musk plugins. Not World-Cup-only.',
+    description: 'PM Event Analyst — same-event matrix + football/tennis/NBA/politics/weather/macro-Fed/Musk plugins; fixture/hard_veto where applicable.',
     load: (payload) => pmEventReadoutWithCache(payload)
   },
   '/content-verify-claims': {
@@ -192,7 +208,7 @@ const PAID_RADAR_ROUTES = {
     load: (payload) => sportsCockpitWithCache(payload)
   },
   '/weather-event-readout': {
-    description: 'Weather Event Readout — temperature-ladder PM card + optional caller forecast/obs. Pass query or slug.',
+    description: 'Weather Event Readout — temperature-ladder + hard_veto_gaps/adjacent-ladder; optional caller weather{}; no scrape. Pass query or slug.',
     load: (payload) => scenarioSkuWithCache('weather_event_readout', payload)
   },
   '/politics-event-readout': {
@@ -200,24 +216,40 @@ const PAID_RADAR_ROUTES = {
     load: (payload) => scenarioSkuWithCache('politics_event_readout', payload)
   },
   '/macro-fed-readout': {
-    description: 'Macro Fed Readout — Fed/FOMC rate-decision market card with honest anchor gaps. Pass query or slug.',
+    description: 'Macro Fed Readout — Fed/FOMC L1 rate ladder + expected-move heuristic; honest anchor gaps. Pass query or slug.',
     load: (payload) => scenarioSkuWithCache('macro_fed_readout', payload)
   },
   '/football-match-card': {
-    description: 'Football Match Card — same-event matrix + fixture gate + expression comparison. Pass query or slug.',
+    description: 'Football Match Card — matrix + fixture gate + hard_veto_gaps + expression compare; match vs outright. Pass query or slug.',
     load: (payload) => scenarioSkuWithCache('football_match_card', payload)
   },
   '/tennis-match-card': {
-    description: 'Tennis Match Card — format-aware ML/set handicap/totals. Pass query or slug.',
+    description: 'Tennis Match Card — format-aware matrix + fixture/hard_veto_gaps + domination check. Pass query or slug.',
     load: (payload) => scenarioSkuWithCache('tennis_match_card', payload)
   },
   '/nba-match-card': {
-    description: 'NBA Match Card — moneyline/spread/totals matrix. Pass query or slug.',
+    description: 'NBA Match Card — moneyline/spread/totals matrix; match vs outright filter. Pass query or slug.',
     load: (payload) => scenarioSkuWithCache('nba_match_card', payload)
   },
   '/pm-decision-card': {
-    description: 'PM Decision Card — preflight + optional event context → skip/watch/eligible_for_manual_review. Replay before each order. Not a buy tip.',
+    description: 'PM Decision Card — opportunity_state + skip/watch/eligible; optional size/bankroll → share-first quantity. Replay before each order. Not a buy tip.',
     load: (payload) => pmDecisionCardWithCache(payload)
+  },
+  '/pm-market-scan': {
+    description: 'PM Market Scan — read-only Gamma volume+spread scanner (polymarket-toolkit pm scan). Optional query; min_volume + limit.',
+    load: (payload) => pmMarketScanWithCache(payload)
+  },
+  '/pm-market-health': {
+    description: 'PM Market Health — spread / depth / overround snapshot for one market or event. Read-only; not a buy tip.',
+    load: (payload) => pmMarketHealthWithCache(payload)
+  },
+  '/pm-wallet-report': {
+    description: 'PM Wallet Report — one-pager composing profile + brier + pnl audit (quick/full). Read-only toolkit Drawer A.',
+    load: (payload) => pmWalletReportWithCache(payload)
+  },
+  '/pm-updown-readout': {
+    description: 'PM Up/Down Readout — crypto up/down event surface + resolution-source pitfalls (polymarket-toolkit pm updown). Read-only.',
+    load: (payload) => pmUpdownReadoutWithCache(payload)
   }
 };
 
@@ -599,6 +631,71 @@ async function pmDecisionCardWithCache(payload) {
   });
 }
 
+async function pmMarketScanWithCache(payload) {
+  const query = String(payload?.query ?? payload?.q ?? '').trim().toLowerCase();
+  const limit = Number.parseInt(payload?.limit, 10) || 10;
+  const minVolume = Number(payload?.min_volume ?? payload?.minVolume ?? 1000) || 1000;
+
+  return radarWithCache({
+    cacheKey: `pm-scan|${query || 'top'}|${limit}|${minVolume}`,
+    loadLive: () => assessPmMarketScanLive(payload),
+    loadFallback: () => buildPmMarketScanFallback(payload)
+  });
+}
+
+async function pmMarketHealthWithCache(payload) {
+  const ref = String(
+    payload?.event_slug
+    ?? payload?.eventSlug
+    ?? payload?.condition_id
+    ?? payload?.slug
+    ?? payload?.market_url
+    ?? ''
+  ).trim().toLowerCase();
+  if (!ref) {
+    throw new Error('pm-market-health requires market_url, slug, condition_id, or event_slug.');
+  }
+
+  return radarWithCache({
+    cacheKey: `pm-health|${ref}`,
+    loadLive: () => assessPmMarketHealthLive(payload),
+    loadFallback: () => buildPmMarketHealthFallback(payload)
+  });
+}
+
+async function pmWalletReportWithCache(payload) {
+  const key = String(payload?.address ?? payload?.wallet ?? payload?.username ?? payload?.query ?? '').trim().toLowerCase();
+  if (!key) {
+    throw new Error('pm-wallet-report requires address or username.');
+  }
+  const pnlMode = String(payload?.pnl_mode ?? payload?.mode ?? 'quick').trim().toLowerCase() === 'full' ? 'full' : 'quick';
+
+  return radarWithCache({
+    cacheKey: `pm-wallet-report|${key}|${pnlMode}`,
+    loadLive: () => assessPmWalletReportLive(payload),
+    loadFallback: () => buildPmWalletReportFallback(payload)
+  });
+}
+
+async function pmUpdownReadoutWithCache(payload) {
+  const ref = String(
+    payload?.event_slug
+    ?? payload?.slug
+    ?? payload?.query
+    ?? payload?.q
+    ?? ''
+  ).trim().toLowerCase();
+  if (!ref) {
+    throw new Error('pm-updown-readout requires event_slug/slug or query.');
+  }
+
+  return radarWithCache({
+    cacheKey: `pm-updown|${ref}`,
+    loadLive: () => assessPmUpdownReadoutLive(payload),
+    loadFallback: () => buildPmUpdownReadoutFallback(payload)
+  });
+}
+
 async function worldCupUpsetAlertWithCache(payload) {
   const market = String(payload?.market ?? payload?.market_id ?? payload?.query ?? 'all').trim().toLowerCase();
   const limit = Number.parseInt(payload?.limit, 10) || 5;
@@ -909,6 +1006,14 @@ function samplePayloadForPath(pathname) {
         size_usd: 25,
         include_event_context: true
       };
+    case '/pm-market-scan':
+      return { limit: 5, min_volume: 1000 };
+    case '/pm-market-health':
+      return { slug: 'will-argentina-win-the-2026-fifa-world-cup-245' };
+    case '/pm-wallet-report':
+      return { address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a', pnl_mode: 'quick' };
+    case '/pm-updown-readout':
+      return { query: 'btc updown' };
     default:
       return { limit: 2 };
   }

@@ -524,6 +524,8 @@ const BASE = 'https://gate.example.com';
   assert.equal(football.category, 'football');
   assert.equal(football.category_depth, 'enriched');
   assert.equal(football.matrix_status, 'complete');
+  assert.equal(football.category_plugin.matrix_completeness.status, 'complete');
+  assert.deepEqual(football.category_plugin.hard_veto_gaps, []);
   assert.ok(football.related_market_count >= 9);
   assert.ok(football.category_plugin.sibling_event_slugs.includes('fifwc-fra-mar-2026-07-09-more-markets'));
   assert.equal(football.category_plugin.fixture.fixture_status, 'ok');
@@ -685,6 +687,8 @@ const BASE = 'https://gate.example.com';
   assert.equal(tennis.category, 'tennis');
   assert.equal(tennis.category_depth, 'enriched');
   assert.equal(tennis.matrix_status, 'complete');
+  assert.equal(tennis.category_plugin.matrix_completeness.status, 'complete');
+  assert.deepEqual(tennis.category_plugin.hard_veto_gaps, []);
   assert.equal(tennis.category_plugin.format.best_of, 3);
   assert.ok(tennis.category_plugin.market_implied_shape.moneyline.player_a);
   assert.ok(tennis.category_plugin.market_implied_shape.moneyline.player_b);
@@ -1098,19 +1102,23 @@ const BASE = 'https://gate.example.com';
     throw new Error(`unexpected ${u}`);
   };
   const card = await assessPmDecisionCardLive(
-    { slug: 'demo-decision', side: 'yes', size_usd: 20 },
+    { slug: 'demo-decision', side: 'yes' },
     { fetchImpl: mockDc }
   );
   assert.equal(card.service_id, 'pm_decision_card');
-  assert.equal(card.schema_version, '0.3');
+  assert.equal(card.schema_version, '0.4');
   assert.ok(['skip', 'watch', 'eligible_for_manual_review'].includes(card.action));
   assert.ok(['no_edge', 'data_blocked', 'manual_micro_validation', 'strong_micro_candidate', 'event_outcome'].includes(card.opportunity_state));
   assert.ok(['event_outcome', 'price_edge', 'no_trade'].includes(card.decision_mode));
   assert.equal(card.threshold_source, 'asp_public_heuristic');
-  assert.equal(card.threshold_version, 'v0.3');
+  assert.equal(card.threshold_version, 'v0.4');
   assert.ok(['cheap', 'acceptable', 'full', 'rich', 'no_edge'].includes(card.price_status));
   assert.equal(card.hard_gate, 'no_orders_no_signing_no_wallet_custody_no_leo_private_bankroll');
   assert.ok(Array.isArray(card.missing_evidence));
+  assert.ok(card.missing_evidence.includes('caller_size_or_bankroll_not_supplied'));
+  assert.ok(['pending_caller_size', 'pending_anchor'].includes(card.order_quantity_shares)
+    || typeof card.order_quantity_shares === 'number');
+  assert.equal(card.sizing_authority, 'caller_supplied_bankroll_or_size_usd');
   assert.ok(['ok', 'conflict', 'incomplete'].includes(card.consistency_check));
   assert.equal(card.decision_card?.opportunity_state, card.opportunity_state);
   assert.ok(card.buyer_summary_en.includes('opportunity_state='));
@@ -1120,6 +1128,170 @@ const BASE = 'https://gate.example.com';
   assert.ok(card.paid_checks?.checks?.length >= 6);
   assert.equal(typeof card.paid_checks.pass_count, 'number');
   assert.ok(card.decision_card?.next_actions?.length >= 1);
+
+  const sized = await assessPmDecisionCardLive(
+    {
+      slug: 'demo-decision',
+      side: 'yes',
+      size_usd: 20,
+      bankroll_usd: 1000,
+      existing_exposure_usd: 0,
+      fair_prob: 0.55
+    },
+    { fetchImpl: mockDc }
+  );
+  assert.equal(typeof sized.order_quantity_shares, 'number');
+  assert.ok(sized.order_quantity_shares >= 1);
+  assert.equal(typeof sized.estimated_cost_u, 'number');
+  assert.ok(['B_minus_probe', 'caller_supplied'].includes(sized.sizing_role));
+  assert.ok(!sized.missing_evidence.includes('caller_size_or_bankroll_not_supplied'));
+}
+
+// ---- unit: pm-market-scan (pure ranker) -------------------------------------
+
+{
+  const { rankMarketsForScan, assessPmMarketScanLive } = await import('../src/pm-market-scan.mjs');
+  const ranked = rankMarketsForScan([
+    { slug: 'low', question: 'Low', active: true, closed: false, volume24hr: 500, spread: 0.01 },
+    { slug: 'wide', question: 'Wide', active: true, closed: false, volume24hr: 9000, spread: 0.05 },
+    { slug: 'top', question: 'Top', active: true, closed: false, volume24hr: 50000, spread: 0.01 },
+    { slug: 'closed', question: 'Closed', active: false, closed: true, volume24hr: 99999, spread: 0.01 }
+  ], { minVolume24hr: 1000, limit: 10 });
+  assert.equal(ranked.length, 2);
+  assert.equal(ranked[0].slug, 'top');
+  assert.equal(ranked[1].slug, 'wide');
+
+  const mockScan = async (url) => {
+    const u = String(url);
+    if (!u.includes('gamma-api.polymarket.com/markets')) throw new Error(`unexpected ${u}`);
+    return new Response(JSON.stringify([
+      { slug: 'scan-a', question: 'A?', active: true, closed: false, volume24hr: 12000, spread: 0.02, bestBid: 0.4, bestAsk: 0.42 },
+      { slug: 'scan-b', question: 'B?', active: true, closed: false, volume24hr: 800, spread: 0.01 }
+    ]), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const scan = await assessPmMarketScanLive({ limit: 5, min_volume: 1000 }, { fetchImpl: mockScan });
+  assert.equal(scan.service_id, 'pm_market_scan');
+  assert.equal(scan.market_count, 1);
+  assert.equal(scan.markets[0].slug, 'scan-a');
+}
+
+// ---- unit: pm-market-health (classify via mock gamma) -----------------------
+
+{
+  const { assessPmMarketHealthLive } = await import('../src/pm-market-health.mjs');
+  const mockTight = async (url) => {
+    const u = String(url);
+    if (!u.includes('gamma-api.polymarket.com/markets')) throw new Error(`unexpected ${u}`);
+    return new Response(JSON.stringify([{
+      slug: 'health-tight',
+      question: 'Tight book?',
+      active: true,
+      closed: false,
+      volume24hr: 25000,
+      spread: 0.02,
+      bestBid: 0.48,
+      bestAsk: 0.5,
+      outcomePrices: '["0.49","0.51"]',
+      liquidityNum: 100000
+    }]), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const tight = await assessPmMarketHealthLive({ slug: 'health-tight' }, { fetchImpl: mockTight });
+  assert.equal(tight.service_id, 'pm_market_health');
+  assert.equal(tight.health_verdict, 'ok_tight');
+  assert.equal(tight.primary.overround, 1);
+
+  const mockWide = async () => new Response(JSON.stringify([{
+    slug: 'health-wide',
+    question: 'Wide?',
+    active: true,
+    closed: false,
+    volume24hr: 10000,
+    spread: 0.12,
+    outcomePrices: '["0.4","0.6"]',
+    bestBid: 0.35,
+    bestAsk: 0.47
+  }]), { status: 200, headers: { 'content-type': 'application/json' } });
+  const wide = await assessPmMarketHealthLive({ slug: 'health-wide' }, { fetchImpl: mockWide });
+  assert.equal(wide.health_verdict, 'wide_spread');
+}
+
+// ---- unit: pm-wallet-report (compose with mocks) ----------------------------
+
+{
+  const { assessPmWalletReportLive } = await import('../src/pm-wallet-report.mjs');
+  const address = '0x63ce342161250d705dc0b16df89036c8e5f9ba9a';
+  const mockWallet = async (url) => {
+    const u = String(url);
+    if (u.includes('lb-api.polymarket.com/profit')) {
+      return new Response(JSON.stringify([{
+        amount: 15,
+        name: 'demo',
+        proxyWallet: address
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('data-api.polymarket.com/positions')) {
+      return new Response(JSON.stringify([
+        { title: 'A', size: 10, avgPrice: 0.4, cashPnl: 10, currentValue: 14, redeemable: true },
+        { title: 'B', size: 5, avgPrice: 0.2, cashPnl: 3, currentValue: 0, redeemable: true },
+        { title: 'C', size: 2, avgPrice: 0.5, cashPnl: 1, currentValue: 3, redeemable: false }
+      ]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('data-api.polymarket.com/activity')) {
+      return new Response(JSON.stringify([{ type: 'TRADE' }, { type: 'TRADE' }]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+  const report = await assessPmWalletReportLive(
+    { address, pnl_mode: 'quick' },
+    { fetchImpl: mockWallet }
+  );
+  assert.equal(report.service_id, 'pm_wallet_report');
+  assert.equal(report.layers.pnl_audit.divergence_verdict, 'aligned');
+  assert.ok(['trust_for_copy', 'trust_with_calibration_check', 'verify_manually', 'distrust_claims'].includes(report.composite_action));
+  assert.equal(typeof report.layers.profile.pnl_7d, 'number');
+  assert.ok(report.layers.brier.rating);
+  assert.ok(report.buyer_summary_zh.includes('钱包一页纸'));
+}
+
+// ---- unit: pm-updown-readout (mock gamma) -----------------------------------
+
+{
+  const { assessPmUpdownReadoutLive } = await import('../src/pm-updown-readout.mjs');
+  const mockUpdown = async (url) => {
+    const u = String(url);
+    if (u.includes('/events?slug=')) {
+      return new Response(JSON.stringify([{
+        title: 'Bitcoin Up or Down - July 26',
+        slug: 'btc-updown-demo',
+        endDate: '2026-07-26T12:00:00Z',
+        resolutionSource: 'https://www.binance.com/en/trade/BTC_USDT',
+        markets: [{
+          question: 'Bitcoin Up or Down',
+          slug: 'btc-updown-m1',
+          conditionId: '0xup',
+          groupItemTitle: 'Up',
+          outcomePrices: '["0.55","0.45"]',
+          bestBid: 0.54,
+          bestAsk: 0.56,
+          spread: 0.02,
+          resolutionSource: 'binance'
+        }]
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+  const updown = await assessPmUpdownReadoutLive(
+    { event_slug: 'btc-updown-demo' },
+    { fetchImpl: mockUpdown }
+  );
+  assert.equal(updown.service_id, 'pm_updown_readout');
+  assert.equal(updown.event.slug, 'btc-updown-demo');
+  assert.equal(updown.markets.length, 1);
+  assert.ok(updown.pitfalls.length >= 2);
+  assert.ok(updown.buyer_summary_zh.includes('涨跌盘'));
 }
 
 // ---- unit: pm-pnl-audit -----------------------------------------------------
@@ -1168,6 +1340,147 @@ const BASE = 'https://gate.example.com';
   assert.equal(audit.action, 'trust_for_copy');
   assert.equal(audit.value_loop.paid_value_tier, 'A_tier_audit');
   assert.equal(audit.activity_hint.trade_rows_first_page, 2);
+
+  const mockFull = async (url) => {
+    const u = String(url);
+    if (u.includes('lb-api.polymarket.com/profit')) {
+      return new Response(JSON.stringify([{
+        amount: 12,
+        name: 'demo',
+        proxyWallet: address
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('data-api.polymarket.com/positions')) {
+      return new Response(JSON.stringify([
+        { title: 'A', size: 10, avgPrice: 0.4, cashPnl: 10, currentValue: 14, curPrice: 0.5 }
+      ]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('type=TRADE')) {
+      return new Response(JSON.stringify([
+        { type: 'TRADE', side: 'BUY', usdcSize: 20, timestamp: 1700000000 },
+        { type: 'TRADE', side: 'SELL', usdcSize: 25, timestamp: 1700000100 }
+      ]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('type=REDEEM')) {
+      return new Response(JSON.stringify([
+        { type: 'REDEEM', usdcSize: 2, timestamp: 1700000200 }
+      ]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('type=MERGE') || u.includes('type=SPLIT') || u.includes('type=MAKER_REBATE')
+      || u.includes('type=REWARD') || u.includes('type=REFERRAL_REWARD') || u.includes('type=CONVERSION')) {
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected full ${u}`);
+  };
+  const full = await assessPmPnlAuditLive(
+    { address, mode: 'full' },
+    { fetchImpl: mockFull, fullBudgetMs: 5000 }
+  );
+  assert.equal(full.mode, 'live_full');
+  assert.equal(full.cashflow_replay.status, 'complete');
+  // SELL 25 + REDEEM 2 - BUY 20 + unrealized 10*0.5 = 12
+  assert.equal(full.cashflow_replay.pnl_trading_usd, 12);
+  assert.equal(full.divergence_verdict, 'aligned');
+  assert.equal(full.action, 'trust_for_copy');
+  assert.equal(full.divergence.compared_layer, 'cashflow_replay');
+}
+
+// ---- unit: scenario discovery category hard gate ---------------------------
+
+{
+  const {
+    scoreCategoryMatch,
+    assessTennisMatchCardLive,
+    assessFootballMatchCardLive
+  } = await import('../src/pm-scenario-skus.mjs');
+
+  assert.equal(
+    scoreCategoryMatch('counter-strike liquid vs atputies - map 1 winner', ['tennis']),
+    0,
+    'esports + Atputies must not score as tennis'
+  );
+  assert.ok(
+    scoreCategoryMatch('atp wimbledon djokovic vs alcaraz', ['tennis']) >= 5,
+    'real tennis blob should score'
+  );
+  assert.equal(
+    scoreCategoryMatch('bruno fernandes pfa team of the year', ['football']),
+    0,
+    'award markets without football tokens should not score as football'
+  );
+  assert.ok(
+    scoreCategoryMatch('premier league arsenal vs chelsea moneyline', ['football']) >= 5
+  );
+
+  const csOnlySearch = async (url) => {
+    const u = String(url);
+    if (u.includes('public-search')) {
+      return new Response(JSON.stringify({
+        events: [{
+          title: 'Counter-Strike: Liquid vs Atputies - Map 1 Winner',
+          slug: 'cs-liquid-atputies-map1',
+          closed: false,
+          volume24hr: 90000,
+          markets: [{
+            conditionId: '0xcs1',
+            slug: 'cs-liquid-atputies-map1-winner',
+            question: 'Counter-Strike: Liquid vs Atputies - Map 1 Winner',
+            outcomes: '["Yes","No"]',
+            outcomePrices: '["0.55","0.45"]',
+            volume24hr: 90000,
+            active: true,
+            closed: false
+          }]
+        }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    // No tennis tag/category defaults in this mock → unavailable
+    if (u.includes('/events') || u.includes('/markets')) {
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+
+  const tennisMisroute = await assessTennisMatchCardLive(
+    { query: 'atp' },
+    { fetchImpl: csOnlySearch }
+  );
+  assert.equal(tennisMisroute.capability_status, 'no_active_markets');
+  assert.equal(tennisMisroute.action, 'unavailable');
+  assert.notEqual(tennisMisroute.input?.slug, 'cs-liquid-atputies-map1-winner');
+
+  const footballAwardOnly = async (url) => {
+    const u = String(url);
+    if (u.includes('public-search') || u.includes('/events') || u.includes('/markets')) {
+      if (u.includes('public-search')) {
+        return new Response(JSON.stringify({
+          events: [{
+            title: 'Bruno Fernandes PFA Team of the Year',
+            slug: 'bruno-fernandes-pfa-toty',
+            closed: false,
+            volume24hr: 80000,
+            markets: [{
+              conditionId: '0xaw1',
+              slug: 'bruno-fernandes-pfa-toty-yes',
+              question: 'Will Bruno Fernandes make the PFA Team of the Year?',
+              outcomes: '["Yes","No"]',
+              outcomePrices: '["0.4","0.6"]',
+              volume24hr: 80000,
+              active: true,
+              closed: false
+            }]
+          }]
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+  const footballMisroute = await assessFootballMatchCardLive(
+    { query: 'premier league' },
+    { fetchImpl: footballAwardOnly }
+  );
+  assert.equal(footballMisroute.capability_status, 'no_active_markets');
 }
 
 // ---- unit: scenario SKUs ---------------------------------------------------
@@ -1644,6 +1957,46 @@ try {
   assert.ok(catalog.services.some((s) => s.service_id === 'token_dd_verdict'));
   assert.ok(catalog.services.some((s) => s.service_id === 'pm_event_readout'));
   assert.ok(catalog.services.some((s) => s.service_id === 'pm_pnl_audit'));
+  assert.ok(catalog.services.some((s) => s.service_id === 'pm_market_scan'));
+  assert.ok(catalog.services.some((s) => s.service_id === 'pm_market_health'));
+  assert.ok(catalog.services.some((s) => s.service_id === 'pm_wallet_report'));
+  assert.ok(catalog.services.some((s) => s.service_id === 'pm_updown_readout'));
+
+  const scanRes = await worker.fetch(new Request(`${BASE}/pm-market-scan`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ limit: 3, min_volume: 1000 })
+  }));
+  assert.equal(scanRes.status, 200);
+  const scanBody = await scanRes.json();
+  assert.equal(scanBody.service_id, 'pm_market_scan');
+
+  const healthRes = await worker.fetch(new Request(`${BASE}/pm-market-health`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ slug: 'demo-health' })
+  }));
+  assert.equal(healthRes.status, 200);
+  const healthBody = await healthRes.json();
+  assert.equal(healthBody.service_id, 'pm_market_health');
+
+  const walletRes = await worker.fetch(new Request(`${BASE}/pm-wallet-report`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a', pnl_mode: 'quick' })
+  }));
+  assert.equal(walletRes.status, 200);
+  const walletBody = await walletRes.json();
+  assert.equal(walletBody.service_id, 'pm_wallet_report');
+
+  const updownRes = await worker.fetch(new Request(`${BASE}/pm-updown-readout`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ event_slug: 'btc-updown-demo' })
+  }));
+  assert.equal(updownRes.status, 200);
+  const updownBody = await updownRes.json();
+  assert.equal(updownBody.service_id, 'pm_updown_readout');
 
   const readRes = await worker.fetch(new Request(`${BASE}/pm-event-readout`, {
     method: 'POST',

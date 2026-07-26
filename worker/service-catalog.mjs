@@ -28,7 +28,11 @@ export const LISTED_SERVICE_PATHS = new Set([
   '/football-match-card',
   '/tennis-match-card',
   '/nba-match-card',
-  '/pm-decision-card'
+  '/pm-decision-card',
+  '/pm-market-scan',
+  '/pm-market-health',
+  '/pm-wallet-report',
+  '/pm-updown-readout'
 ]);
 
 export const SERVICE_CATALOG = {
@@ -161,7 +165,7 @@ export const SERVICE_CATALOG = {
   },
   '/pm-pnl-audit': {
     service_id: 'pm_pnl_audit',
-    okx_service_id: null,
+    okx_service_id: 37157,
     title: 'PM PnL Audit',
     category: 'finance',
     fee_usdt: '0.1',
@@ -275,6 +279,43 @@ export const SERVICE_CATALOG = {
     fee_usdt: '0.15',
     fee_atomic: '150000',
     mode: 'live'
+  },
+  // Code-ready; NOT on OKX until Leo authorize create/activate
+  '/pm-market-scan': {
+    service_id: 'pm_market_scan',
+    okx_service_id: null,
+    title: '市场扫描 / PM Market Scan',
+    category: 'finance',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live'
+  },
+  '/pm-market-health': {
+    service_id: 'pm_market_health',
+    okx_service_id: null,
+    title: '盘口健康 / PM Market Health',
+    category: 'finance',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live'
+  },
+  '/pm-wallet-report': {
+    service_id: 'pm_wallet_report',
+    okx_service_id: null,
+    title: '钱包一页纸 / PM Wallet Report',
+    category: 'finance',
+    fee_usdt: '0.15',
+    fee_atomic: '150000',
+    mode: 'live'
+  },
+  '/pm-updown-readout': {
+    service_id: 'pm_updown_readout',
+    okx_service_id: null,
+    title: '涨跌盘读出 / PM Up/Down Readout',
+    category: 'finance',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
+    mode: 'live'
   }
 };
 
@@ -339,8 +380,8 @@ export const OKX_LISTING_COPY = {
   30215: {
     serviceName: 'PM Event Readout',
     serviceDescription:
-      'Sports-ready event evidence card: same-event market matrix, fixture-aware tradability, football/tennis/NBA/weather/Musk plugins. Not a buy tip.\n'
-      + '预测市场事件解读卡：同场矩阵、赛程可交易性；足球/网球/NBA/天气等品类深度。输入 market_url 或 slug；不下单。'
+      'Event evidence card: same-event matrix + football/tennis/NBA/politics/weather/macro-Fed/Musk plugins (fixture/hard_veto where applicable). Not a buy tip.\n'
+      + '预测市场事件解读卡：同场矩阵；足球/网球/NBA/政治/天气/美联储/Musk 等品类插件（含赛程/硬闸）。输入 market_url 或 slug；不下单。'
   },
   30216: {
     serviceName: 'Content Verify Claims',
@@ -405,8 +446,8 @@ export const OKX_LISTING_COPY = {
   36675: {
     serviceName: 'Weather Event Readout',
     serviceDescription:
-      'Live weather temperature-ladder card: discovers an active market via query (or category default), then returns bucket surface; if none, capability_status=no_active_markets.\n'
-      + '天气温度阶梯卡：用 query 发现活跃盘（否则品类默认盘）；无盘返回 no_active_markets。输入 query 或 slug；不下单。'
+      'Live weather temperature-ladder card: query/default discovery, bucket surface, hard_veto_gaps (station/obs/snapshot/ladder) + adjacent-ladder diagnostics; no_active_markets if none. Optional caller weather{}; no station scrape.\n'
+      + '天气温度阶梯卡：发现活跃盘、桶面、station/实况/快照硬闸、相邻桶诊断；无盘 no_active_markets。可选 weather{}；不爬站、不下单。'
   },
   36676: {
     serviceName: 'Politics Event Readout',
@@ -417,32 +458,38 @@ export const OKX_LISTING_COPY = {
   36677: {
     serviceName: 'Macro Fed Readout',
     serviceDescription:
-      'Live Fed/FOMC rate card: query discovery or category default; honest external-anchor gaps; no_active_markets if none.\n'
-      + '美联储利率宏观卡：query/品类默认发现活跃盘；无盘返回 no_active_markets。输入 query 或 slug；不下单。'
+      'Live Fed/FOMC rate card: query/default discovery + L1 rate-decision ladder / expected-move heuristic; honest external-anchor gaps; no_active_markets if none.\n'
+      + '美联储利率宏观卡：发现活跃盘 + L1 利率阶梯/隐含变动；外部锚定缺口如实标注。无盘 no_active_markets。输入 query/slug；不下单。'
   },
   36678: {
     serviceName: 'Football Match Card',
     serviceDescription:
-      'Live football evidence card: query discovery or category default, then same-event matrix / expression compare; no_active_markets if none. Not a buy tip.\n'
-      + '足球比赛卡：query/品类默认发现活跃盘后给出矩阵比较；无盘返回 no_active_markets。输入 query/slug；不下单。'
+      'Live football evidence card: discovery + same-event matrix, fixture gate, matrix_completeness/hard_veto_gaps, expression compare; match vs outright_season; no_active_markets if none. Not a buy tip.\n'
+      + '足球比赛卡：同场矩阵、赛程闸门、完备性硬闸、表达比较；区分单场/赛季 outright。无盘 no_active_markets。输入 query/slug；不下单。'
   },
   36679: {
     serviceName: 'Tennis Match Card',
     serviceDescription:
-      'Live tennis evidence card: query discovery or category default; format-aware ML/set/totals; no_active_markets if none. Not a buy tip.\n'
-      + '网球比赛卡：query/品类默认发现活跃盘；无盘返回 no_active_markets。输入 query/slug；不下单。'
+      'Live tennis evidence card: format-aware ML/set/totals, fixture gate, matrix_completeness/hard_veto_gaps, domination check; no_active_markets if none. Not a buy tip.\n'
+      + '网球比赛卡：赛制感知矩阵、赛程闸门、完备性硬闸、直落盘检查。无盘 no_active_markets。输入 query/slug；不下单。'
   },
   36680: {
     serviceName: 'NBA Match Card',
     serviceDescription:
-      'Live NBA evidence card: query discovery or category default; moneyline/spread/totals matrix; no_active_markets if none. Not a buy tip.\n'
-      + 'NBA 比赛卡：query/品类默认发现活跃盘；无盘返回 no_active_markets。输入 query/slug；不下单。'
+      'Live NBA evidence card: query/default discovery; moneyline/spread/totals matrix; match vs outright_season filter; no_active_markets if none. Not a buy tip.\n'
+      + 'NBA 比赛卡：胜负/让分/总分矩阵；区分单场/赛季 outright。无盘 no_active_markets。输入 query/slug；不下单。'
   },
   36681: {
     serviceName: 'PM Decision Card',
     serviceDescription:
-      'Pre-trade decision gate: preflight + optional event context → skip/watch/eligible_for_manual_review. Replay before each order. Not a buy tip.\n'
-      + '预测市场决策卡：下单前机械检查+事件上下文 → 跳过/观望/可人工复核。每次下单前重跑；非买点。'
+      'Pre-trade decision gate: preflight + optional event context → opportunity_state + skip/watch/eligible_for_manual_review; optional size_usd/bankroll_usd → order_quantity_shares (share-first). Replay before each order. Not a buy tip; no orders.\n'
+      + '预测市场决策卡：机械检查+事件上下文 → opportunity_state + 跳过/观望/可人工复核；可选 size/bankroll → shares。每次下单前重跑；非买点、不下单。'
+  },
+  37157: {
+    serviceName: 'PM PnL Audit',
+    serviceDescription:
+      'Polymarket PnL trust gate: quick LB vs position cashPnL, or mode=full Worker-safe cashflow replay (TRADE/REDEEM/MERGE/SPLIT/REBATE/… ) with honest pagination_incomplete. Data only.\n'
+      + 'Polymarket PnL 审计：quick 对比排行榜与持仓 cashPnL；mode=full 做现金回流（含分页 incomplete 诚实标记）。输入 address/username；只读不下单。'
   }
 };
 
@@ -475,8 +522,8 @@ export const PENDING_OKX_LISTING_COPY = {
   pm_pnl_audit: {
     serviceName: 'PM PnL Audit',
     serviceDescription:
-      'Quick Polymarket PnL trust gate: compares LB all-time profit, position cashPnL and activity hints; full replay stubbed. Data only.\n'
-      + 'Polymarket PnL 快速审计：对比排行榜利润、持仓 cashPnL 和 activity 提示；完整流水回放后续授权再上。输入 address/username。'
+      'Polymarket PnL trust gate: quick LB vs position cashPnL, or mode=full Worker-safe cashflow replay (TRADE/REDEEM/MERGE/SPLIT/REBATE/… ) with honest pagination_incomplete. Data only.\n'
+      + 'Polymarket PnL 审计：quick 对比排行榜与持仓 cashPnL；mode=full 做现金回流（含分页 incomplete 诚实标记）。输入 address/username；只读不下单。'
   },
   agent_budget_preflight: {
     serviceName: 'Agent Budget Preflight',
@@ -511,44 +558,68 @@ export const PENDING_OKX_LISTING_COPY = {
   weather_event_readout: {
     serviceName: 'Weather Event Readout',
     serviceDescription:
-      'Temperature-ladder prediction-market card: bucket surface + optional caller forecast/obs snapshot. Data only.\n'
-      + '天气温度阶梯卡：桶分布 + 可选预报/实况快照。输入 query 或 slug + 可选 weather{}；不下单、不爬站。'
+      'Live weather temperature-ladder card: query/default discovery, bucket surface, hard_veto_gaps (station/obs/snapshot/ladder) + adjacent-ladder diagnostics; no_active_markets if none. Optional caller weather{}; no station scrape.\n'
+      + '天气温度阶梯卡：发现活跃盘、桶面、station/实况/快照硬闸、相邻桶诊断；无盘 no_active_markets。可选 weather{}；不爬站、不下单。'
   },
   politics_event_readout: {
     serviceName: 'Politics Event Readout',
     serviceDescription:
-      'Election/politics ladder card: candidate yes-mass leaderboard + exclusivity sanity. Data only.\n'
-      + '政治选举盘口卡：候选人 yes 质量排行 + 互斥性检查。输入 query 或 slug；不下单。'
+      'Live politics/election ladder card: query discovery or category default; exclusivity sanity; no_active_markets if none.\n'
+      + '政治选举盘口卡：query/品类默认发现活跃盘；无盘返回 no_active_markets。输入 query 或 slug；不下单。'
   },
   macro_fed_readout: {
     serviceName: 'Macro Fed Readout',
     serviceDescription:
-      'Fed/FOMC rate-decision market card with honest external-anchor gaps. Data only.\n'
-      + '美联储利率宏观卡：FOMC/利率盘口矩阵；外部锚定缺口如实标注。输入 query 或 slug；不下单。'
+      'Live Fed/FOMC rate card: query/default discovery + L1 rate-decision ladder / expected-move heuristic; honest external-anchor gaps; no_active_markets if none.\n'
+      + '美联储利率宏观卡：发现活跃盘 + L1 利率阶梯/隐含变动；外部锚定缺口如实标注。无盘 no_active_markets。输入 query/slug；不下单。'
   },
   football_match_card: {
     serviceName: 'Football Match Card',
     serviceDescription:
-      'Football match evidence card: same-event matrix, fixture gate, expression comparison. Not a buy tip.\n'
-      + '足球比赛卡：同场矩阵、赛程闸门、表达比较。输入 query/slug + 可选 football{}；不下单。'
+      'Live football evidence card: discovery + same-event matrix, fixture gate, matrix_completeness/hard_veto_gaps, expression compare; match vs outright_season; no_active_markets if none. Not a buy tip.\n'
+      + '足球比赛卡：同场矩阵、赛程闸门、完备性硬闸、表达比较；区分单场/赛季 outright。无盘 no_active_markets。输入 query/slug；不下单。'
   },
   tennis_match_card: {
     serviceName: 'Tennis Match Card',
     serviceDescription:
-      'Tennis match evidence card: format-aware ML/set handicap/totals + domination check. Not a buy tip.\n'
-      + '网球比赛卡：赛制感知的胜负/盘口/总局数。输入 query/slug + 可选 tennis{}；不下单。'
+      'Live tennis evidence card: format-aware ML/set/totals, fixture gate, matrix_completeness/hard_veto_gaps, domination check; no_active_markets if none. Not a buy tip.\n'
+      + '网球比赛卡：赛制感知矩阵、赛程闸门、完备性硬闸、直落盘检查。无盘 no_active_markets。输入 query/slug；不下单。'
   },
   nba_match_card: {
     serviceName: 'NBA Match Card',
     serviceDescription:
-      'NBA match evidence card: moneyline/spread/totals matrix + heuristic coherence. Not a buy tip.\n'
-      + 'NBA 比赛卡：胜负/让分/总分矩阵。输入 query/slug + 可选 nba{}；不下单。'
+      'Live NBA evidence card: query/default discovery; moneyline/spread/totals matrix; match vs outright_season filter; no_active_markets if none. Not a buy tip.\n'
+      + 'NBA 比赛卡：胜负/让分/总分矩阵；区分单场/赛季 outright。无盘 no_active_markets。输入 query/slug；不下单。'
   },
   pm_decision_card: {
     serviceName: 'PM Decision Card',
     serviceDescription:
-      'Pre-trade decision gate: preflight + optional event context → skip/watch/eligible_for_manual_review. Replay before each order. Not a buy tip.\n'
-      + '预测市场决策卡：下单前机械检查+事件上下文 → 跳过/观望/可人工复核。每次下单前重跑；非买点。'
+      'Pre-trade decision gate: preflight + optional event context → opportunity_state + skip/watch/eligible_for_manual_review; optional size_usd/bankroll_usd → order_quantity_shares (share-first). Replay before each order. Not a buy tip; no orders.\n'
+      + '预测市场决策卡：机械检查+事件上下文 → opportunity_state + 跳过/观望/可人工复核；可选 size/bankroll → shares。每次下单前重跑；非买点、不下单。'
+  },
+  pm_market_scan: {
+    serviceName: '市场扫描 / PM Market Scan',
+    serviceDescription:
+      'Read-only Polymarket market scanner: rank active books by 24h volume and spread (toolkit pm scan). Optional query + min_volume + limit. Not a buy tip.\n'
+      + '市场扫描：按 24h 成交量与价差筛活跃盘（toolkit pm scan）。输入可选 query + min_volume + limit；只读不下单。'
+  },
+  pm_market_health: {
+    serviceName: '盘口健康 / PM Market Health',
+    serviceDescription:
+      'Read-only book health: spread, depth proxies, yes/no overround for one market or event. Flags wide/thin/incoherent books. Not a buy tip.\n'
+      + '盘口健康：价差/深度/overround 快照（单盘或同场）。宽价差或 incoherent 会标出。输入 market_url/slug/event_slug；只读不下单。'
+  },
+  pm_wallet_report: {
+    serviceName: '钱包一页纸 / PM Wallet Report',
+    serviceDescription:
+      'Composed wallet one-pager: profile + Brier calibration + PnL audit (quick/full) in one JSON. Copy-trust composite; data only.\n'
+      + '钱包一页纸：画像 + Brier 校准 + PnL 审计（quick/full）合成。输出 composite_action；输入 address/username；只读不下单。'
+  },
+  pm_updown_readout: {
+    serviceName: '涨跌盘读出 / PM Up/Down Readout',
+    serviceDescription:
+      'Crypto up/down event surface from Gamma with resolution-source pitfalls (toolkit pm updown). Verify settlement rules before pricing. Not a buy tip.\n'
+      + '涨跌盘读出：Gamma 涨跌事件面 + 结算源陷阱提示（toolkit pm updown）。先核结算定义再谈价。输入 event_slug 或 query；只读不下单。'
   },
   crypto_market_regime_radar: OKX_LISTING_COPY[30211],
   world_cup_upset_alert: OKX_LISTING_COPY[30212],
