@@ -297,6 +297,7 @@ function buildFootballOutrightCategory({ market, eventBundle, classified }) {
       volume_24h_usd: row.volume_24h_usd,
       is_primary: row.is_primary === true
     }))
+    .filter((row) => !isPlaceholderOutrightRow(row))
     .sort((a, b) => b.yes - a.yes || (b.volume_24h_usd || 0) - (a.volume_24h_usd || 0));
 
   const leader = leaderboard[0] || null;
@@ -746,15 +747,34 @@ function cleanOutrightLabel(row) {
     .replace(/\?$/, '')
     .trim();
   // Avoid opaque placeholders when title parsing failed
-  if (!label || /^team\s*[ab]$/i.test(label) || /^outcome\s*\d+$/i.test(label)) {
+  if (!label || /^team\s*[a-z]$/i.test(label) || /^outcome\s*\d+$/i.test(label)) {
     const fromSlug = String(row.slug || '')
       .replace(/^will-/, '')
       .replace(/-win-the-.*$/, '')
       .replace(/-/g, ' ')
       .trim();
-    if (fromSlug && !/^team\s*[ab]$/i.test(fromSlug)) label = fromSlug;
+    if (fromSlug && !/^team\s*[a-z]$/i.test(fromSlug) && !/^another team/i.test(fromSlug)) {
+      label = fromSlug;
+    }
   }
   return label || String(raw);
+}
+
+function isPlaceholderOutrightRow(row) {
+  const label = String(row.label || '').trim();
+  const slug = String(row.slug || '').toLowerCase();
+  if (/^team\s*[a-z]$/i.test(label) || /^other$/i.test(label) || /^another team/i.test(label)) {
+    return true;
+  }
+  if (/will-team-[a-z]-|will-another-team-/.test(slug)) return true;
+  // Ghost quotes: flat 0.5 with no bid / ask=1 / zero volume
+  const vol = Number(row.volume_24h_usd) || 0;
+  const ask = row.best_ask;
+  const bid = row.best_bid;
+  if (vol <= 0 && (ask == null || ask >= 0.99) && (bid == null) && Number(row.yes) === 0.5) {
+    return true;
+  }
+  return false;
 }
 
 function groupBy(items, fn) {

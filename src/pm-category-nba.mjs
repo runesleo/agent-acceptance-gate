@@ -175,6 +175,7 @@ function buildNbaOutrightCategory({ market, eventBundle, classified }) {
       volume_24h_usd: row.volume_24h_usd,
       is_primary: row.is_primary === true
     }))
+    .filter((row) => !isPlaceholderNbaOutrightRow(row))
     .sort((a, b) => b.yes - a.yes || (b.volume_24h_usd || 0) - (a.volume_24h_usd || 0));
 
   const leader = leaderboard[0] || null;
@@ -237,11 +238,28 @@ function buildNbaOutrightCategory({ market, eventBundle, classified }) {
 function cleanNbaOutrightLabel(row) {
   const raw = row.group_item_title || row.title || row.slug || 'unknown';
   return String(raw)
-    .replace(/^will\s+/i, '')
+    .replace(/^will\s+(?:the\s+)?/i, '')
     .replace(/\s+win\s+(?:the\s+)?(?:nba finals|nba championship|championship|title|conference).*$/i, '')
+    .replace(/\s+be\s+(?:the\s+)?(?:202\d\s+)?nba\s+(?:western|eastern)\s+conference\s+champion.*$/i, '')
     .replace(/\s+be\s+(?:the\s+)?(?:nba\s+)?mvp.*$/i, '')
     .replace(/\?$/, '')
     .trim() || String(raw);
+}
+
+function isPlaceholderNbaOutrightRow(row) {
+  const label = String(row.label || '').trim();
+  const slug = String(row.slug || '').toLowerCase();
+  if (/^team\s*[a-z]$/i.test(label) || /^other$/i.test(label) || /^another team/i.test(label)) {
+    return true;
+  }
+  if (/will-team-[a-z]-|will-another-team-/.test(slug)) return true;
+  const vol = Number(row.volume_24h_usd) || 0;
+  const ask = row.best_ask;
+  const bid = row.best_bid;
+  if (vol <= 0 && (ask == null || ask >= 0.99) && bid == null && Number(row.yes) === 0.5) {
+    return true;
+  }
+  return false;
 }
 
 export function classifyNbaGroup(row) {

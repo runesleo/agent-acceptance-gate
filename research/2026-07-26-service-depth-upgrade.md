@@ -19,3 +19,7 @@ Leo's feedback was correct: several paid surfaces were too shallow in ways that 
 - No SKU count expansion.
 - No orders, bankroll, scraping, or onchain mutation.
 - Category defaults remain available for generic queries, but no longer override a specific wrong-entity query.
+
+## Follow-up 2026-07-26b
+- Filter Polymarket Team A/B/Other ghost outright rows from football/NBA leaderboards.
+- Match-card discovery prefers match surface over season winner when available.
