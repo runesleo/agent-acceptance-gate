@@ -218,8 +218,10 @@ async function resolveScenarioInput(input, spec, fetchImpl) {
   }
 
   const query = String(input.query ?? input.market ?? input.topic ?? spec.default_query).trim();
+  const preferredSurface = preferredSurfaceForScenario(spec.service_id);
   const queryDiscovery = await discoverSlug(fetchImpl, buildQueryVariants(query, spec), spec.expected, {
-    originalQuery: query
+    originalQuery: query,
+    preferredSurface
   });
   if (queryDiscovery.slug) {
     return {
@@ -231,7 +233,10 @@ async function resolveScenarioInput(input, spec, fetchImpl) {
     };
   }
 
-  const categoryDiscovery = await discoverCategoryDefault(fetchImpl, spec, { originalQuery: query });
+  const categoryDiscovery = await discoverCategoryDefault(fetchImpl, spec, {
+    originalQuery: query,
+    preferredSurface
+  });
   if (categoryDiscovery.slug) {
     return {
       ...input,
@@ -264,11 +269,13 @@ async function resolveScenarioInput(input, spec, fetchImpl) {
 
 async function discoverSlug(fetchImpl, queryVariants, expectedCategories, options = {}) {
   const originalQuery = String(options.originalQuery ?? queryVariants?.[0] ?? '').trim();
+  const preferredSurface = options.preferredSurface || null;
   const requiresEntity = queryRequiresEntityMatch(originalQuery);
   const discovery = {
     method: null,
     query_variants: [],
     candidates_seen: 0,
+    preferred_surface: preferredSurface,
     semantic_entity_required: requiresEntity,
     semantic_threshold: requiresEntity ? STRONG_ENTITY_SEMANTIC_THRESHOLD : null
   };
@@ -286,10 +293,11 @@ async function discoverSlug(fetchImpl, queryVariants, expectedCategories, option
       const candidates = collectEventMarketCandidates(
         Array.isArray(result?.events) ? result.events : [],
         expectedCategories,
-        originalQuery
+        originalQuery,
+        preferredSurface
       );
       discovery.candidates_seen += candidates.length;
-      const best = pickBestCandidate(candidates, { requiresEntity });
+      const best = pickBestCandidate(candidates, { requiresEntity, preferredSurface });
       if (best) {
         return {
           slug: best.slug,
@@ -298,7 +306,8 @@ async function discoverSlug(fetchImpl, queryVariants, expectedCategories, option
             ...discovery,
             method: `public-search:${query}`,
             selected: best.slug,
-            selected_semantic_score: best.semantic_score
+            selected_semantic_score: best.semantic_score,
+            selected_surface: best.surface
           },
           hadSuccessfulFetch,
           errors
@@ -314,12 +323,14 @@ async function discoverSlug(fetchImpl, queryVariants, expectedCategories, option
 
 async function discoverCategoryDefault(fetchImpl, spec, options = {}) {
   const originalQuery = String(options.originalQuery ?? '').trim();
+  const preferredSurface = options.preferredSurface || null;
   const requiresEntity = queryRequiresEntityMatch(originalQuery);
   const discovery = {
     method: null,
     tag_slugs: [],
     category_keywords: [],
     candidates_seen: 0,
+    preferred_surface: preferredSurface,
     semantic_entity_required: requiresEntity,
     semantic_threshold: requiresEntity ? STRONG_ENTITY_SEMANTIC_THRESHOLD : null
   };
@@ -337,10 +348,11 @@ async function discoverCategoryDefault(fetchImpl, spec, options = {}) {
       const candidates = collectEventMarketCandidates(
         Array.isArray(events) ? events : [],
         spec.expected,
-        originalQuery
+        originalQuery,
+        preferredSurface
       );
       discovery.candidates_seen += candidates.length;
-      const best = pickBestCandidate(candidates, { requiresEntity });
+      const best = pickBestCandidate(candidates, { requiresEntity, preferredSurface });
       if (best) {
         return {
           slug: best.slug,
@@ -348,7 +360,8 @@ async function discoverCategoryDefault(fetchImpl, spec, options = {}) {
             ...discovery,
             method: `tag_slug:${tag}`,
             selected: best.slug,
-            selected_semantic_score: best.semantic_score
+            selected_semantic_score: best.semantic_score,
+            selected_surface: best.surface
           },
           hadSuccessfulFetch,
           errors
@@ -370,10 +383,11 @@ async function discoverCategoryDefault(fetchImpl, spec, options = {}) {
       const candidates = collectEventMarketCandidates(
         Array.isArray(result?.events) ? result.events : [],
         spec.expected,
-        originalQuery
+        originalQuery,
+        preferredSurface
       );
       discovery.candidates_seen += candidates.length;
-      const best = pickBestCandidate(candidates, { requiresEntity });
+      const best = pickBestCandidate(candidates, { requiresEntity, preferredSurface });
       if (best) {
         return {
           slug: best.slug,
@@ -381,7 +395,8 @@ async function discoverCategoryDefault(fetchImpl, spec, options = {}) {
             ...discovery,
             method: `category_keyword:${keyword}`,
             selected: best.slug,
-            selected_semantic_score: best.semantic_score
+            selected_semantic_score: best.semantic_score,
+            selected_surface: best.surface
           },
           hadSuccessfulFetch,
           errors
@@ -398,9 +413,14 @@ async function discoverCategoryDefault(fetchImpl, spec, options = {}) {
       `${GAMMA_BASE}/markets?closed=false&active=true&limit=50&order=volume24hr&ascending=false`
     );
     hadSuccessfulFetch = true;
-    const candidates = collectMarketCandidates(Array.isArray(rows) ? rows : [], spec.expected, originalQuery);
+    const candidates = collectMarketCandidates(
+      Array.isArray(rows) ? rows : [],
+      spec.expected,
+      originalQuery,
+      preferredSurface
+    );
     discovery.candidates_seen += candidates.length;
-    const best = pickBestCandidate(candidates, { requiresEntity });
+    const best = pickBestCandidate(candidates, { requiresEntity, preferredSurface });
     if (best) {
       return {
         slug: best.slug,
@@ -408,7 +428,8 @@ async function discoverCategoryDefault(fetchImpl, spec, options = {}) {
           ...discovery,
           method: 'top_volume_category_filter',
           selected: best.slug,
-          selected_semantic_score: best.semantic_score
+          selected_semantic_score: best.semantic_score,
+          selected_surface: best.surface
         },
         hadSuccessfulFetch,
         errors
@@ -421,39 +442,59 @@ async function discoverCategoryDefault(fetchImpl, spec, options = {}) {
   return { slug: null, discovery, hadSuccessfulFetch, errors };
 }
 
+function preferredSurfaceForScenario(serviceId) {
+  if (serviceId === 'football_match_card' || serviceId === 'tennis_match_card' || serviceId === 'nba_match_card') {
+    return 'match';
+  }
+  if (serviceId === 'macro_fed_readout' || serviceId === 'politics_event_readout') {
+    return 'ladder';
+  }
+  return null;
+}
+
 function buildQueryVariants(query, spec) {
+  const q = String(query || '').trim();
+  const extras = [];
+  if (queryRequiresEntityMatch(q) && preferredSurfaceForScenario(spec.service_id) === 'match') {
+    extras.push(`${q} vs`, `${q} versus`, `${q} match`);
+  }
   return uniqueStrings([
-    query,
+    q,
+    ...extras,
     ...(spec.query_variants || []),
     spec.default_query,
     ...(spec.expected || [])
   ]);
 }
 
-function collectEventMarketCandidates(events, expectedCategories, query = '') {
+function collectEventMarketCandidates(events, expectedCategories, query = '', preferredSurface = null) {
   const candidates = [];
   for (const event of events) {
     if (event?.closed) continue;
     const eventBlob = `${event.title || ''} ${event.slug || ''}`.toLowerCase();
     for (const market of event.markets || []) {
       if (!market?.slug || market.closed || market.active === false) continue;
-      const blob = `${eventBlob} ${market.question || ''} ${market.slug || ''}`.toLowerCase();
+      const title = market.question || market.title || '';
+      const blob = `${eventBlob} ${title} ${market.slug || ''}`.toLowerCase();
       const categoryScore = scoreCategoryMatch(blob, expectedCategories);
       if (categoryScore <= 0) continue;
       const volume = toNumber(market.volume24hr ?? market.volumeNum ?? market.volume ?? event.volume24hr);
       const semanticScore = query
         ? scoreSemanticMatch({
             query,
-            title: market.question || market.title,
+            title,
             slug: market.slug,
             eventTitle: event.title || event.slug
           })
         : 0;
+      const surface = classifyMarketSurface(blob);
+      const surfaceBoost = scoreSurfacePreference(surface, preferredSurface);
       candidates.push({
         slug: market.slug,
-        score: categoryScore + semanticScore * 2 + Math.min(volume / 100000, 3),
+        score: categoryScore + semanticScore * 2 + surfaceBoost + Math.min(volume / 100000, 3),
         category_score: categoryScore,
         semantic_score: semanticScore,
+        surface,
         volume
       });
     }
@@ -461,38 +502,70 @@ function collectEventMarketCandidates(events, expectedCategories, query = '') {
   return candidates;
 }
 
-function collectMarketCandidates(markets, expectedCategories, query = '') {
+function collectMarketCandidates(markets, expectedCategories, query = '', preferredSurface = null) {
   const candidates = [];
   for (const market of markets) {
     if (!market?.slug || market.closed || market.active === false) continue;
-    const blob = `${market.question || ''} ${market.slug || ''} ${market.description || ''}`.toLowerCase();
+    const title = market.question || market.title || market.description || '';
+    const blob = `${title} ${market.slug || ''}`.toLowerCase();
     const categoryScore = scoreCategoryMatch(blob, expectedCategories);
     if (categoryScore <= 0) continue;
     const volume = toNumber(market.volume24hr ?? market.volumeNum ?? market.volume);
     const semanticScore = query
       ? scoreSemanticMatch({
           query,
-          title: market.question || market.title || market.description,
+          title,
           slug: market.slug,
           eventTitle: market.events?.[0]?.title || market.eventTitle
         })
       : 0;
+    const surface = classifyMarketSurface(blob);
+    const surfaceBoost = scoreSurfacePreference(surface, preferredSurface);
     candidates.push({
       slug: market.slug,
-      score: categoryScore + semanticScore * 2 + Math.min(volume / 100000, 3),
+      score: categoryScore + semanticScore * 2 + surfaceBoost + Math.min(volume / 100000, 3),
       category_score: categoryScore,
       semantic_score: semanticScore,
+      surface,
       volume
     });
   }
   return candidates;
 }
 
+function classifyMarketSurface(blob) {
+  const text = String(blob || '').toLowerCase();
+  if (/\bvs\.?\b|\bv\b|versus|moneyline|spread|o\/u|over\/under|90m|tip-?off|kickoff/.test(text)) {
+    return 'match';
+  }
+  if (/championship|title|finals|outright|season winner|to win the|league winner|cup winner|fed|fomc|election|nominee|temperature|high temp/.test(text)) {
+    return 'ladder_or_outright';
+  }
+  return 'other';
+}
+
+function scoreSurfacePreference(surface, preferredSurface) {
+  if (!preferredSurface) return 0;
+  if (preferredSurface === 'match') {
+    if (surface === 'match') return 4;
+    if (surface === 'ladder_or_outright') return -3;
+  }
+  if (preferredSurface === 'ladder') {
+    if (surface === 'ladder_or_outright') return 2;
+  }
+  return 0;
+}
+
 function pickBestCandidate(candidates, options = {}) {
   const ranked = candidates
     .slice()
     .sort((a, b) => b.score - a.score || b.semantic_score - a.semantic_score || b.volume - a.volume);
-  const best = ranked[0] ?? null;
+  let pool = ranked;
+  if (options.preferredSurface === 'match') {
+    const matchOnly = ranked.filter((c) => c.surface === 'match');
+    if (matchOnly.length) pool = matchOnly;
+  }
+  const best = pool[0] ?? null;
   if (!best) return null;
   if (options.requiresEntity && best.semantic_score < STRONG_ENTITY_SEMANTIC_THRESHOLD) {
     return null;

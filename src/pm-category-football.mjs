@@ -739,11 +739,22 @@ function compactRow(row) {
 
 function cleanOutrightLabel(row) {
   const raw = row.group_item_title || row.title || row.slug || 'unknown';
-  return String(raw)
+  let label = String(raw)
     .replace(/^will\s+/i, '')
-    .replace(/\s+win\s+(?:the\s+)?(?:premier league|champions league|world cup|fifa world cup|championship|cup|tournament).*$/i, '')
+    .replace(/\s+win\s+(?:the\s+)?(?:english\s+)?(?:premier league|epl|champions league|world cup|fifa world cup|championship|cup|tournament|serie a|la liga|bundesliga).*$/i, '')
+    .replace(/\s+to\s+win\s+(?:the\s+)?.+$/i, '')
     .replace(/\?$/, '')
-    .trim() || raw;
+    .trim();
+  // Avoid opaque placeholders when title parsing failed
+  if (!label || /^team\s*[ab]$/i.test(label) || /^outcome\s*\d+$/i.test(label)) {
+    const fromSlug = String(row.slug || '')
+      .replace(/^will-/, '')
+      .replace(/-win-the-.*$/, '')
+      .replace(/-/g, ' ')
+      .trim();
+    if (fromSlug && !/^team\s*[ab]$/i.test(fromSlug)) label = fromSlug;
+  }
+  return label || String(raw);
 }
 
 function groupBy(items, fn) {

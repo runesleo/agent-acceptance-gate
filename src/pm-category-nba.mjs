@@ -23,6 +23,11 @@ export function enrichNbaCategory({ market, eventBundle, eventMatrix, fixture = 
     market_group: classifyNbaGroup(row)
   }));
 
+  const marketType = detectNbaMarketType({ market, eventBundle, eventMatrix });
+  if (marketType === 'outright_season') {
+    return buildNbaOutrightCategory({ market, eventBundle, classified });
+  }
+
   const groups = groupBy(classified, (row) => row.market_group);
   const missing = [];
   for (const key of REQUIRED_GROUPS) {
@@ -66,6 +71,7 @@ export function enrichNbaCategory({ market, eventBundle, eventMatrix, fixture = 
   return {
     category: 'nba',
     category_depth: 'enriched',
+    market_type: 'match',
     primary_event_slug: eventBundle?.primary_event_slug || eventBundle?.slug || null,
     sibling_event_slugs: eventBundle?.sibling_event_slugs || [],
     linked_event_count: eventBundle?.linked_event_count
@@ -140,6 +146,102 @@ export function extractNbaFixture(input = {}, options = {}) {
     competition,
     verified: raw.verified === true
   };
+}
+
+function detectNbaMarketType({ market, eventBundle, eventMatrix }) {
+  const blob = [
+    market?.question,
+    market?.slug,
+    eventBundle?.title,
+    eventBundle?.slug,
+    ...(eventMatrix || []).flatMap((row) => [row.title, row.group_item_title, row.slug])
+  ].filter(Boolean).join(' ').toLowerCase();
+  const looksMatch = /\bvs\.?\b|\bv\b|versus|moneyline|spread|o\/u|over\/under|tip-?off/.test(blob);
+  const looksOutright = /nba finals|championship|conference|outright|season|to win the|title|mvp/.test(blob)
+    && /win|champion|finals|title|mvp/.test(blob);
+  if (looksOutright && !looksMatch) return 'outright_season';
+  return 'match';
+}
+
+function buildNbaOutrightCategory({ market, eventBundle, classified }) {
+  const leaderboard = (classified || [])
+    .filter((row) => Number.isFinite(row.yes))
+    .map((row) => ({
+      label: cleanNbaOutrightLabel(row),
+      yes: row.yes,
+      slug: row.slug,
+      best_ask: row.best_ask,
+      best_bid: row.best_bid,
+      volume_24h_usd: row.volume_24h_usd,
+      is_primary: row.is_primary === true
+    }))
+    .sort((a, b) => b.yes - a.yes || (b.volume_24h_usd || 0) - (a.volume_24h_usd || 0));
+
+  const leader = leaderboard[0] || null;
+  const runner = leaderboard[1] || null;
+  const yesMass = leaderboard.reduce((sum, row) => sum + (row.yes || 0), 0);
+  const missing = leaderboard.length >= 2 ? [] : ['outright_winner_field'];
+  const central_thesis = leader
+    ? `NBA outright/futures leaderboard leads "${leader.label}" at yes≈${leader.yes}`
+      + (runner ? ` vs "${runner.label}" ≈${runner.yes}` : '')
+      + '. Not a single-game moneyline/spread/totals map.'
+    : 'NBA finals/futures surface detected, but priced field rows are thin.';
+
+  return {
+    category: 'nba',
+    category_depth: 'enriched',
+    market_type: 'outright_season',
+    primary_event_slug: eventBundle?.primary_event_slug || eventBundle?.slug || null,
+    sibling_event_slugs: eventBundle?.sibling_event_slugs || [],
+    linked_event_count: eventBundle?.linked_event_count
+      ?? (1 + (eventBundle?.sibling_event_slugs?.length || 0)),
+    discovery: eventBundle?.discovery || null,
+    related_market_count: (classified || []).length,
+    group_counts: { outright_winner: (classified || []).length },
+    matrix_status: missing.length ? 'incomplete' : 'complete',
+    missing_market_groups: missing,
+    market_surface: {
+      outright_leaderboard: leaderboard.slice(0, 12)
+    },
+    market_implied_shape: {
+      leader: leader ? { label: leader.label, yes: leader.yes } : null,
+      runner_up: runner ? { label: runner.label, yes: runner.yes } : null,
+      yes_mass_sum: round2(yesMass),
+      central_thesis
+    },
+    fixture: {
+      fixture_status: 'not_applicable',
+      note: 'NBA finals/futures outright; tipoff fixture gate not applicable.'
+    },
+    coherence: {
+      coherence_status: missing.length ? 'incomplete_matrix' : 'ok_heuristic',
+      cross_market_residuals: yesMass > 1.15
+        ? [{ type: 'yes_mass_over_one', note: `Yes-mass ≈${round2(yesMass)}` }]
+        : [],
+      distribution_note: 'Futures leaderboard only; not a single-game state map.'
+    },
+    recommended_expression: null,
+    default_action_hint: missing.length ? 'no_trade' : 'use_decision_card_after_field_definition_check',
+    tradability_cap: missing.length ? 'weak' : null,
+    tradability_reasons: missing.length ? ['nba_outright_field_thin'] : [],
+    central_thesis,
+    hard_gate: 'no_orders_no_account_mutation_no_leo_bankroll',
+    skill_alignment: {
+      source: 'sports_generalization_nba_outright_extension',
+      included: ['outright_leaderboard', 'yes_mass_sanity'],
+      excluded_local_only: ['injury_scrape', 'full_player_props']
+    }
+  };
+}
+
+function cleanNbaOutrightLabel(row) {
+  const raw = row.group_item_title || row.title || row.slug || 'unknown';
+  return String(raw)
+    .replace(/^will\s+/i, '')
+    .replace(/\s+win\s+(?:the\s+)?(?:nba finals|nba championship|championship|title|conference).*$/i, '')
+    .replace(/\s+be\s+(?:the\s+)?(?:nba\s+)?mvp.*$/i, '')
+    .replace(/\?$/, '')
+    .trim() || String(raw);
 }
 
 export function classifyNbaGroup(row) {
