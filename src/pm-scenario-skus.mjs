@@ -10,6 +10,12 @@ import {
   resolveMarketRef,
   fetchJson
 } from './pm-gamma-market.mjs';
+import {
+  queryRequiresEntityMatch,
+  scoreSemanticMatch
+} from './pm-semantic-match.mjs';
+
+const STRONG_ENTITY_SEMANTIC_THRESHOLD = 4.5;
 
 const SCENARIOS = {
   weather_event_readout: {
@@ -212,7 +218,9 @@ async function resolveScenarioInput(input, spec, fetchImpl) {
   }
 
   const query = String(input.query ?? input.market ?? input.topic ?? spec.default_query).trim();
-  const queryDiscovery = await discoverSlug(fetchImpl, buildQueryVariants(query, spec), spec.expected);
+  const queryDiscovery = await discoverSlug(fetchImpl, buildQueryVariants(query, spec), spec.expected, {
+    originalQuery: query
+  });
   if (queryDiscovery.slug) {
     return {
       ...input,
@@ -223,7 +231,7 @@ async function resolveScenarioInput(input, spec, fetchImpl) {
     };
   }
 
-  const categoryDiscovery = await discoverCategoryDefault(fetchImpl, spec);
+  const categoryDiscovery = await discoverCategoryDefault(fetchImpl, spec, { originalQuery: query });
   if (categoryDiscovery.slug) {
     return {
       ...input,
@@ -254,8 +262,16 @@ async function resolveScenarioInput(input, spec, fetchImpl) {
   };
 }
 
-async function discoverSlug(fetchImpl, queryVariants, expectedCategories) {
-  const discovery = { method: null, query_variants: [], candidates_seen: 0 };
+async function discoverSlug(fetchImpl, queryVariants, expectedCategories, options = {}) {
+  const originalQuery = String(options.originalQuery ?? queryVariants?.[0] ?? '').trim();
+  const requiresEntity = queryRequiresEntityMatch(originalQuery);
+  const discovery = {
+    method: null,
+    query_variants: [],
+    candidates_seen: 0,
+    semantic_entity_required: requiresEntity,
+    semantic_threshold: requiresEntity ? STRONG_ENTITY_SEMANTIC_THRESHOLD : null
+  };
   const errors = [];
   let hadSuccessfulFetch = false;
 
@@ -269,15 +285,21 @@ async function discoverSlug(fetchImpl, queryVariants, expectedCategories) {
       hadSuccessfulFetch = true;
       const candidates = collectEventMarketCandidates(
         Array.isArray(result?.events) ? result.events : [],
-        expectedCategories
+        expectedCategories,
+        originalQuery
       );
       discovery.candidates_seen += candidates.length;
-      const best = pickBestCandidate(candidates);
+      const best = pickBestCandidate(candidates, { requiresEntity });
       if (best) {
         return {
           slug: best.slug,
           query,
-          discovery: { ...discovery, method: `public-search:${query}`, selected: best.slug },
+          discovery: {
+            ...discovery,
+            method: `public-search:${query}`,
+            selected: best.slug,
+            selected_semantic_score: best.semantic_score
+          },
           hadSuccessfulFetch,
           errors
         };
@@ -290,12 +312,16 @@ async function discoverSlug(fetchImpl, queryVariants, expectedCategories) {
   return { slug: null, query: null, discovery, hadSuccessfulFetch, errors };
 }
 
-async function discoverCategoryDefault(fetchImpl, spec) {
+async function discoverCategoryDefault(fetchImpl, spec, options = {}) {
+  const originalQuery = String(options.originalQuery ?? '').trim();
+  const requiresEntity = queryRequiresEntityMatch(originalQuery);
   const discovery = {
     method: null,
     tag_slugs: [],
     category_keywords: [],
-    candidates_seen: 0
+    candidates_seen: 0,
+    semantic_entity_required: requiresEntity,
+    semantic_threshold: requiresEntity ? STRONG_ENTITY_SEMANTIC_THRESHOLD : null
   };
   const errors = [];
   let hadSuccessfulFetch = false;
@@ -308,13 +334,22 @@ async function discoverCategoryDefault(fetchImpl, spec) {
         `${GAMMA_BASE}/events?closed=false&active=true&limit=25&order=volume24hr&ascending=false&tag_slug=${encodeURIComponent(tag)}`
       );
       hadSuccessfulFetch = true;
-      const candidates = collectEventMarketCandidates(Array.isArray(events) ? events : [], spec.expected);
+      const candidates = collectEventMarketCandidates(
+        Array.isArray(events) ? events : [],
+        spec.expected,
+        originalQuery
+      );
       discovery.candidates_seen += candidates.length;
-      const best = pickBestCandidate(candidates);
+      const best = pickBestCandidate(candidates, { requiresEntity });
       if (best) {
         return {
           slug: best.slug,
-          discovery: { ...discovery, method: `tag_slug:${tag}`, selected: best.slug },
+          discovery: {
+            ...discovery,
+            method: `tag_slug:${tag}`,
+            selected: best.slug,
+            selected_semantic_score: best.semantic_score
+          },
           hadSuccessfulFetch,
           errors
         };
@@ -334,14 +369,20 @@ async function discoverCategoryDefault(fetchImpl, spec) {
       hadSuccessfulFetch = true;
       const candidates = collectEventMarketCandidates(
         Array.isArray(result?.events) ? result.events : [],
-        spec.expected
+        spec.expected,
+        originalQuery
       );
       discovery.candidates_seen += candidates.length;
-      const best = pickBestCandidate(candidates);
+      const best = pickBestCandidate(candidates, { requiresEntity });
       if (best) {
         return {
           slug: best.slug,
-          discovery: { ...discovery, method: `category_keyword:${keyword}`, selected: best.slug },
+          discovery: {
+            ...discovery,
+            method: `category_keyword:${keyword}`,
+            selected: best.slug,
+            selected_semantic_score: best.semantic_score
+          },
           hadSuccessfulFetch,
           errors
         };
@@ -357,13 +398,18 @@ async function discoverCategoryDefault(fetchImpl, spec) {
       `${GAMMA_BASE}/markets?closed=false&active=true&limit=50&order=volume24hr&ascending=false`
     );
     hadSuccessfulFetch = true;
-    const candidates = collectMarketCandidates(Array.isArray(rows) ? rows : [], spec.expected);
+    const candidates = collectMarketCandidates(Array.isArray(rows) ? rows : [], spec.expected, originalQuery);
     discovery.candidates_seen += candidates.length;
-    const best = pickBestCandidate(candidates);
+    const best = pickBestCandidate(candidates, { requiresEntity });
     if (best) {
       return {
         slug: best.slug,
-        discovery: { ...discovery, method: 'top_volume_category_filter', selected: best.slug },
+        discovery: {
+          ...discovery,
+          method: 'top_volume_category_filter',
+          selected: best.slug,
+          selected_semantic_score: best.semantic_score
+        },
         hadSuccessfulFetch,
         errors
       };
@@ -384,7 +430,7 @@ function buildQueryVariants(query, spec) {
   ]);
 }
 
-function collectEventMarketCandidates(events, expectedCategories) {
+function collectEventMarketCandidates(events, expectedCategories, query = '') {
   const candidates = [];
   for (const event of events) {
     if (event?.closed) continue;
@@ -395,9 +441,19 @@ function collectEventMarketCandidates(events, expectedCategories) {
       const categoryScore = scoreCategoryMatch(blob, expectedCategories);
       if (categoryScore <= 0) continue;
       const volume = toNumber(market.volume24hr ?? market.volumeNum ?? market.volume ?? event.volume24hr);
+      const semanticScore = query
+        ? scoreSemanticMatch({
+            query,
+            title: market.question || market.title,
+            slug: market.slug,
+            eventTitle: event.title || event.slug
+          })
+        : 0;
       candidates.push({
         slug: market.slug,
-        score: categoryScore + Math.min(volume / 100000, 3),
+        score: categoryScore + semanticScore * 2 + Math.min(volume / 100000, 3),
+        category_score: categoryScore,
+        semantic_score: semanticScore,
         volume
       });
     }
@@ -405,7 +461,7 @@ function collectEventMarketCandidates(events, expectedCategories) {
   return candidates;
 }
 
-function collectMarketCandidates(markets, expectedCategories) {
+function collectMarketCandidates(markets, expectedCategories, query = '') {
   const candidates = [];
   for (const market of markets) {
     if (!market?.slug || market.closed || market.active === false) continue;
@@ -413,19 +469,35 @@ function collectMarketCandidates(markets, expectedCategories) {
     const categoryScore = scoreCategoryMatch(blob, expectedCategories);
     if (categoryScore <= 0) continue;
     const volume = toNumber(market.volume24hr ?? market.volumeNum ?? market.volume);
+    const semanticScore = query
+      ? scoreSemanticMatch({
+          query,
+          title: market.question || market.title || market.description,
+          slug: market.slug,
+          eventTitle: market.events?.[0]?.title || market.eventTitle
+        })
+      : 0;
     candidates.push({
       slug: market.slug,
-      score: categoryScore + Math.min(volume / 100000, 3),
+      score: categoryScore + semanticScore * 2 + Math.min(volume / 100000, 3),
+      category_score: categoryScore,
+      semantic_score: semanticScore,
       volume
     });
   }
   return candidates;
 }
 
-function pickBestCandidate(candidates) {
-  return candidates
+function pickBestCandidate(candidates, options = {}) {
+  const ranked = candidates
     .slice()
-    .sort((a, b) => b.score - a.score || b.volume - a.volume)[0] ?? null;
+    .sort((a, b) => b.score - a.score || b.semantic_score - a.semantic_score || b.volume - a.volume);
+  const best = ranked[0] ?? null;
+  if (!best) return null;
+  if (options.requiresEntity && best.semantic_score < STRONG_ENTITY_SEMANTIC_THRESHOLD) {
+    return null;
+  }
+  return best;
 }
 
 function buildScenarioUnavailable(spec, input, resolvedInput) {

@@ -17,6 +17,7 @@ import { enrichTennisCategory, extractTennisFixture } from './pm-category-tennis
 import { enrichWeatherCategory, extractWeatherSnapshot } from './pm-category-weather.mjs';
 import { enrichNbaCategory, extractNbaFixture } from './pm-category-nba.mjs';
 import { enrichPoliticsCategory } from './pm-category-politics.mjs';
+import { enrichMacroFedCategory } from './pm-category-macro-fed.mjs';
 
 const SERVICE_ID = 'pm_event_readout';
 const SCHEMA_VERSION = '0.2';
@@ -138,6 +139,9 @@ export async function assessPmEventReadoutLive(input = {}, options = {}) {
         : []),
       ...(categoryPlugin.category_depth === 'enriched' && categoryPlugin.category === 'politics'
         ? ['Politics plugin applied: candidate yes-mass leaderboard + exclusivity sanity. Not a buy tip.']
+        : []),
+      ...(categoryPlugin.category_depth === 'enriched' && categoryPlugin.category === 'macro_fed'
+        ? ['Macro Fed plugin applied: rate-decision ladder + expected-move heuristic. Not a buy tip.']
         : []),
       ...(categoryPlugin.category_depth === 'enriched' && categoryPlugin.category === 'musk'
         ? ['Musk ladder plugin applied (shape demo). Prefer football/tennis/nba for sports depth.']
@@ -270,6 +274,18 @@ function maybeApplyCategoryPlugin({
       category_plugin: plugin
     };
   }
+  if (readout.category === 'macro_fed') {
+    const plugin = enrichMacroFedCategory({
+      market,
+      eventBundle,
+      eventMatrix: readout.event_matrix
+    });
+    return {
+      category: plugin.category,
+      category_depth: plugin.category_depth,
+      category_plugin: plugin
+    };
+  }
   return {
     category_depth: 'core_only',
     category_plugin: null
@@ -297,7 +313,7 @@ export function buildPmEventReadoutFallback(input = {}) {
     market_fixture_match: 'unknown',
     category: 'generic',
     category_depth: 'core_only',
-    plugins_available: ['football', 'tennis', 'nba', 'nfl', 'ufc', 'mlb', 'politics', 'weather', 'musk'],
+    plugins_available: ['football', 'tennis', 'nba', 'nfl', 'ufc', 'mlb', 'politics', 'macro_fed', 'weather', 'musk'],
     sources_read: ['static_fallback'],
     base_case: 'Demo readout only.',
     key_uncertainties: ['live_data_unavailable'],
@@ -378,7 +394,7 @@ function buildEventReadout(market, eventBundle, externalAnchors) {
     market_fixture_match: eventSlug ? 'ok' : 'single_market_no_parent_event',
     category,
     category_depth: 'core_only',
-    plugins_available: ['football', 'tennis', 'nba', 'nfl', 'ufc', 'mlb', 'politics', 'weather', 'musk'],
+    plugins_available: ['football', 'tennis', 'nba', 'nfl', 'ufc', 'mlb', 'politics', 'macro_fed', 'weather', 'musk'],
     sources_read: sources,
     base_case: primaryPrice !== null
       ? `Market prices "${primaryOutcome}" at ${round2(primaryPrice)} (${Math.round(primaryPrice * 100)}% implied).`

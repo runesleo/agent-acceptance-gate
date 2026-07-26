@@ -26,6 +26,11 @@ export function enrichFootballCategory({ market, eventBundle, eventMatrix, fixtu
     market_group: classifyFootballGroup(row)
   }));
 
+  const marketType = detectFootballMarketType({ market, eventBundle, eventMatrix: classified });
+  if (marketType === 'outright_season') {
+    return buildFootballOutrightCategory({ market, eventBundle, classified });
+  }
+
   const groups = groupBy(classified, (row) => row.market_group);
   const missing = [];
   for (const key of REQUIRED_GROUPS) {
@@ -47,7 +52,7 @@ export function enrichFootballCategory({ market, eventBundle, eventMatrix, fixtu
   const teamTotals = summarizeTeamTotals(groups.team_totals || []);
 
   const fixtureGate = evaluateFixtureGate(market, eventBundle, fixture);
-  const shape = buildImpliedShape({ moneyline, totals, spreads, btts, advance, teamTotals });
+  const shape = buildImpliedShape({ moneyline, totals, spreads, btts, advance, teamTotals, missing_market_groups: missing });
   const expressions = buildExpressionComparison({ moneyline, totals, spreads, btts, advance, shape });
 
   let tradability_cap = null;
@@ -85,6 +90,7 @@ export function enrichFootballCategory({ market, eventBundle, eventMatrix, fixtu
   return {
     category: 'football',
     category_depth: 'enriched',
+    market_type: 'match',
     primary_event_slug: eventBundle?.primary_event_slug || eventBundle?.slug || null,
     sibling_event_slugs: eventBundle?.sibling_event_slugs || [],
     linked_event_count: eventBundle?.linked_event_count
@@ -256,6 +262,135 @@ export function classifyFootballGroup(row) {
   return 'other';
 }
 
+export function detectFootballMarketType({ market, eventBundle, eventMatrix = [] } = {}) {
+  const blob = [
+    market?.title,
+    market?.slug,
+    market?.group_item_title,
+    eventBundle?.title,
+    eventBundle?.slug,
+    ...(eventMatrix || []).flatMap((row) => [row.title, row.group_item_title, row.slug])
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  const looksMatch = /\bvs\.?\b|\bv\b|versus|moneyline|90m|team to advance/.test(blob);
+  const looksOutright = /outright|season winner|league winner|cup winner|championship|title winner|to win (?:the )?.*(?:cup|league|championship|tournament)|winner of .*(?:season|league|cup|championship)|lift (?:the )?cup|world.?cup.*winner|premier league.*winner|champions league.*winner/.test(blob);
+  if (looksOutright && !looksMatch) return 'outright_season';
+  if (looksOutright && /world.?cup.*winner|season winner|league winner|cup winner|outright/.test(blob)) {
+    return 'outright_season';
+  }
+  return 'match';
+}
+
+function buildFootballOutrightCategory({ market, eventBundle, classified }) {
+  const rows = (classified || []).map((row) => ({
+    ...row,
+    market_group: 'outright_winner'
+  }));
+  const leaderboard = rows
+    .filter((row) => Number.isFinite(row.yes))
+    .map((row) => ({
+      label: cleanOutrightLabel(row),
+      yes: row.yes,
+      slug: row.slug,
+      best_ask: row.best_ask,
+      best_bid: row.best_bid,
+      volume_24h_usd: row.volume_24h_usd,
+      is_primary: row.is_primary === true
+    }))
+    .sort((a, b) => b.yes - a.yes || (b.volume_24h_usd || 0) - (a.volume_24h_usd || 0));
+
+  const leader = leaderboard[0] || null;
+  const runner = leaderboard[1] || null;
+  const yesMass = leaderboard.reduce((sum, row) => sum + (row.yes || 0), 0);
+  const missing = leaderboard.length >= 2 ? [] : ['outright_winner_field'];
+  const residuals = [];
+  if (yesMass > 1.15) {
+    residuals.push({
+      type: 'yes_mass_over_one',
+      note: `Outright yes-mass sums to ≈${round2(yesMass)}; field may be overlapping or incomplete.`
+    });
+  }
+  if (leader && runner && leader.yes - runner.yes < 0.05 && leader.yes > 0.20) {
+    residuals.push({
+      type: 'tight_outright_leaderboard',
+      note: 'Leader and runner-up are tightly priced; avoid over-reading a single favorite.'
+    });
+  }
+
+  const central_thesis = leader
+    ? `Outright leaderboard leads "${leader.label}" at yes≈${leader.yes}`
+      + (runner ? ` vs "${runner.label}" ≈${runner.yes}` : '')
+      + '. This is a season/cup winner surface, not a 90m match state map.'
+    : 'Outright season/cup market detected, but priced team-winner rows are missing.';
+
+  const matrix_status = missing.length ? 'incomplete' : 'complete';
+  const tradability_cap = missing.length ? 'weak' : null;
+
+  return {
+    category: 'football',
+    category_depth: 'enriched',
+    market_type: 'outright_season',
+    primary_event_slug: eventBundle?.primary_event_slug || eventBundle?.slug || null,
+    sibling_event_slugs: eventBundle?.sibling_event_slugs || [],
+    linked_event_count: eventBundle?.linked_event_count
+      ?? (1 + (eventBundle?.sibling_event_slugs?.length || 0)),
+    discovery: eventBundle?.discovery || null,
+    related_market_count: rows.length,
+    group_counts: { outright_winner: rows.length },
+    matrix_status,
+    missing_market_groups: missing,
+    match_state_map_diagnostic: {
+      status: 'not_applicable_outright',
+      missing_groups_if_forced: REQUIRED_GROUPS,
+      note: 'Outright markets do not have home/draw/away, totals, spreads, or BTTS state-map requirements.'
+    },
+    market_surface: {
+      outright_winner: rows.map(compactRow),
+      outright_leaderboard: leaderboard.slice(0, 12)
+    },
+    market_implied_shape: {
+      leader: leader ? { label: leader.label, yes: leader.yes } : null,
+      runner_up: runner ? { label: runner.label, yes: runner.yes } : null,
+      yes_mass_sum: round2(yesMass),
+      central_thesis
+    },
+    fixture: {
+      fixture_status: 'not_applicable',
+      note: 'Season/cup outright; single-match fixture gate not applicable.'
+    },
+    expression_comparison: {
+      candidates: leaderboard.slice(0, 8).map((row) => ({
+        expression: 'outright_winner',
+        market: row.label,
+        slug: row.slug,
+        yes: row.yes,
+        ask: row.best_ask,
+        path: 'Needs team to win the named season/cup/tournament.',
+        why_consider: 'Direct expression of the outright thesis.',
+        why_not: 'Long horizon, field/definition risk, and no match-state hedge.'
+      })),
+      recommended: null,
+      rule: 'Outrights require field completeness and definition checks; do not map to 90m home/draw/away.'
+    },
+    recommended_expression: null,
+    default_action_hint: missing.length ? 'no_trade' : 'use_decision_card_after_field_definition_check',
+    tradability_cap,
+    tradability_reasons: missing.length ? ['football_outright_field_thin'] : [],
+    central_thesis,
+    coherence: {
+      coherence_status: residuals.length ? 'tension' : (matrix_status === 'complete' ? 'ok_heuristic' : 'incomplete_matrix'),
+      cross_market_residuals: residuals,
+      distribution_note: 'Outright leaderboard only; no 90m scoreline distribution.'
+    },
+    hard_gate: 'no_orders_no_account_mutation_no_leo_bankroll',
+    skill_alignment: {
+      source: 'pm-football-match_outright_season_extension',
+      included: ['outright_leaderboard', 'yes_mass_sanity', 'match_state_map_diagnostic'],
+      excluded_local_only: ['bankroll_pct', 'news_scrape', 'full_field_fundamental_model']
+    }
+  };
+}
+
 function evaluateFixtureGate(market, eventBundle, fixture) {
   const gammaStart = eventBundle?.start_time || market?.start_time || null;
   const gammaEnd = eventBundle?.end_date || market?.end_date || null;
@@ -354,7 +489,7 @@ function summarizeTeamTotals(rows) {
   }));
 }
 
-function buildImpliedShape({ moneyline, totals, spreads, btts, advance, teamTotals }) {
+function buildImpliedShape({ moneyline, totals, spreads, btts, advance, teamTotals, missing_market_groups = [] }) {
   const homeYes = moneyline.home?.yes;
   const drawYes = moneyline.draw?.yes;
   const awayYes = moneyline.away?.yes;
@@ -380,7 +515,10 @@ function buildImpliedShape({ moneyline, totals, spreads, btts, advance, teamTota
     states.push('advance_richer_than_90m_ml_knockout_variance');
   }
 
-  let central_thesis = 'Insufficient structure for a sharp state map.';
+  const missingRequired = (missing_market_groups || []).filter((m) => !m.endsWith('_optional'));
+  let central_thesis = missingRequired.length
+    ? `Match state map incomplete: missing ${missingRequired.join(', ')}.`
+    : 'Insufficient structure for a sharp state map.';
   if (states.includes('favorite_leans_90m_win') && states.includes('market_leans_tight_under_2pt5')) {
     central_thesis = 'Favorite favored in 90m with a relatively tight totals regime — prefer expressions that do not require a blowout.';
   } else if (states.includes('favorite_leans_90m_win') && states.includes('market_leans_open_game_over_2pt5')) {
@@ -389,6 +527,9 @@ function buildImpliedShape({ moneyline, totals, spreads, btts, advance, teamTota
     central_thesis = 'Draw carries material probability — favorite ML is not a free lunch; check spreads and unders.';
   } else if (fav) {
     central_thesis = `Market favorite leans ${fav.label} in 90m (Yes≈${fav.yes}). Compare advance/spreads/totals before choosing expression.`;
+  }
+  if (missingRequired.length && !central_thesis.includes('missing')) {
+    central_thesis += ` Missing groups limiting match state map: ${missingRequired.join(', ')}.`;
   }
 
   return {
@@ -594,6 +735,15 @@ function compactRow(row) {
     volume_24h_usd: row.volume_24h_usd,
     is_primary: row.is_primary
   };
+}
+
+function cleanOutrightLabel(row) {
+  const raw = row.group_item_title || row.title || row.slug || 'unknown';
+  return String(raw)
+    .replace(/^will\s+/i, '')
+    .replace(/\s+win\s+(?:the\s+)?(?:premier league|champions league|world cup|fifa world cup|championship|cup|tournament).*$/i, '')
+    .replace(/\?$/, '')
+    .trim() || raw;
 }
 
 function groupBy(items, fn) {

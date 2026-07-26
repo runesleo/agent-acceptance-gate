@@ -226,6 +226,9 @@ const BASE = 'https://gate.example.com';
     }
   );
   assert.equal(fed.category, 'macro_fed');
+  assert.equal(fed.category_depth, 'enriched');
+  assert.equal(fed.category_plugin.ladder_status, 'rate_ladder');
+  assert.equal(fed.category_plugin.leaderboard[0].bucket, 'hold');
   assert.equal(fed.matrix_status, 'complete');
   assert.equal(fed.related_market_count, 3);
   assert.ok(fed.event_matrix.some((row) => row.group_item_title === '25 bps increase'));
@@ -1272,6 +1275,111 @@ const BASE = 'https://gate.example.com';
   assert.ok(unavailable.paid_checks.fail_count >= 1);
 }
 
+{
+  const { assessNbaMatchCardLive } = await import('../src/pm-scenario-skus.mjs');
+  const lakersMarket = {
+    conditionId: '0xlakers',
+    slug: 'nba-lakers-celtics-lakers',
+    question: 'NBA: Will the Los Angeles Lakers beat the Boston Celtics?',
+    groupItemTitle: 'Los Angeles Lakers',
+    sportsMarketType: 'moneyline',
+    outcomes: '["Yes","No"]',
+    outcomePrices: '["0.57","0.43"]',
+    volume24hr: 25000,
+    active: true,
+    closed: false,
+    events: [{ id: 'nba-lal-bos', slug: 'nba-lakers-celtics', title: 'NBA: Los Angeles Lakers vs Boston Celtics' }]
+  };
+  const clippersMarket = {
+    conditionId: '0xclips',
+    slug: 'nba-lebron-clippers-points',
+    question: 'NBA: Will LeBron James score 25+ points vs the Los Angeles Clippers?',
+    groupItemTitle: 'LeBron James',
+    sportsMarketType: 'player_points',
+    outcomes: '["Yes","No"]',
+    outcomePrices: '["0.51","0.49"]',
+    volume24hr: 900000,
+    active: true,
+    closed: false,
+    events: [{ id: 'nba-clips', slug: 'nba-lebron-clippers', title: 'NBA: LeBron James vs Los Angeles Clippers' }]
+  };
+
+  const mockLakersSearch = async (url) => {
+    const u = String(url);
+    const parsed = new URL(u);
+    if (u.includes('/public-search')) {
+      return new Response(JSON.stringify({
+        events: [{
+          title: 'NBA: LeBron James vs Los Angeles Clippers',
+          slug: 'nba-lebron-clippers',
+          closed: false,
+          markets: [clippersMarket]
+        }, {
+          title: 'NBA: Los Angeles Lakers vs Boston Celtics',
+          slug: 'nba-lakers-celtics',
+          closed: false,
+          markets: [lakersMarket]
+        }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/markets?slug=nba-lakers-celtics-lakers')) {
+      return new Response(JSON.stringify([lakersMarket]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/events?') && parsed.searchParams.get('slug') === 'nba-lakers-celtics') {
+      return new Response(JSON.stringify([{
+        id: 'nba-lal-bos',
+        slug: 'nba-lakers-celtics',
+        title: 'NBA: Los Angeles Lakers vs Boston Celtics',
+        markets: [lakersMarket, {
+          ...lakersMarket,
+          conditionId: '0xceltics',
+          slug: 'nba-lakers-celtics-celtics',
+          question: 'NBA: Will the Boston Celtics beat the Los Angeles Lakers?',
+          groupItemTitle: 'Boston Celtics',
+          outcomePrices: '["0.43","0.57"]',
+          volume24hr: 22000
+        }]
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/events?') || u.includes('/markets?')) {
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+
+  const lakers = await assessNbaMatchCardLive(
+    { query: 'Lakers', nba: { verified: true, market_fixture_match: 'yes' } },
+    { fetchImpl: mockLakersSearch }
+  );
+  assert.equal(lakers.input.slug, 'nba-lakers-celtics-lakers');
+  assert.equal(lakers.scenario.resolved_via, 'public_search');
+
+  const mockClippersOnly = async (url) => {
+    const u = String(url);
+    if (u.includes('/public-search')) {
+      return new Response(JSON.stringify({
+        events: [{
+          title: 'NBA: LeBron James vs Los Angeles Clippers',
+          slug: 'nba-lebron-clippers',
+          closed: false,
+          markets: [clippersMarket]
+        }]
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/events?') || u.includes('/markets?')) {
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+  const unavailable = await assessNbaMatchCardLive(
+    { query: 'Lakers' },
+    { fetchImpl: mockClippersOnly }
+  );
+  assert.equal(unavailable.service_id, 'nba_match_card');
+  assert.equal(unavailable.action, 'unavailable');
+  assert.equal(unavailable.capability_status, 'no_active_markets');
+}
+
 // ---- unit: finance-cockpit -------------------------------------------------
 
 {
@@ -1342,6 +1450,49 @@ const BASE = 'https://gate.example.com';
   assert.equal(politics.category, 'politics');
   assert.equal(politics.ladder_status, 'multi_candidate');
   assert.equal(politics.leaderboard[0].label, 'A');
+}
+
+// ---- unit: macro Fed category plugin ---------------------------------------
+
+{
+  const { enrichMacroFedCategory } = await import('../src/pm-category-macro-fed.mjs');
+  const fed = enrichMacroFedCategory({
+    market: { title: 'Fed Decision in September?', slug: 'fed-september' },
+    eventBundle: { title: 'Fed Decision in September?', slug: 'fed-september' },
+    eventMatrix: [
+      { title: 'No change in Fed interest rates', group_item_title: 'No change', slug: 'fed-hold', yes: 0.58, is_primary: true },
+      { title: 'Fed decrease interest rates by 25 bps', group_item_title: '25 bps decrease', slug: 'fed-cut-25', yes: 0.31 },
+      { title: 'Fed decrease interest rates by 50 bps', group_item_title: '50 bps decrease', slug: 'fed-cut-50', yes: 0.08 },
+      { title: 'Fed increase interest rates by 25 bps', group_item_title: '25 bps increase', slug: 'fed-hike-25', yes: 0.03 }
+    ]
+  });
+  assert.equal(fed.category, 'macro_fed');
+  assert.equal(fed.category_depth, 'enriched');
+  assert.equal(fed.ladder_status, 'rate_ladder');
+  assert.equal(fed.leaderboard[0].bucket, 'hold');
+  assert.equal(fed.implied_expected_move.status, 'estimated');
+  assert.ok(fed.central_thesis.includes('implied expected move'));
+}
+
+// ---- unit: football outright category plugin -------------------------------
+
+{
+  const { enrichFootballCategory } = await import('../src/pm-category-football.mjs');
+  const outright = enrichFootballCategory({
+    market: { title: '2026 Premier League Winner', slug: '2026-premier-league-winner' },
+    eventBundle: { title: '2026 Premier League Winner', slug: '2026-premier-league-winner' },
+    eventMatrix: [
+      { title: 'Will Arsenal win the Premier League?', group_item_title: 'Arsenal', slug: 'pl-arsenal', yes: 0.34, volume_24h_usd: 80000, is_primary: true },
+      { title: 'Will Manchester City win the Premier League?', group_item_title: 'Manchester City', slug: 'pl-man-city', yes: 0.28, volume_24h_usd: 70000 },
+      { title: 'Will Liverpool win the Premier League?', group_item_title: 'Liverpool', slug: 'pl-liverpool', yes: 0.16, volume_24h_usd: 60000 }
+    ]
+  });
+  assert.equal(outright.category, 'football');
+  assert.equal(outright.category_depth, 'enriched');
+  assert.equal(outright.market_type, 'outright_season');
+  assert.equal(outright.market_surface.outright_leaderboard[0].label, 'Arsenal');
+  assert.ok(outright.central_thesis.includes('Outright leaderboard leads'));
+  assert.ok(!outright.central_thesis.includes('Insufficient structure'));
 }
 
 // ---- unit: publish-readiness ------------------------------------------------
