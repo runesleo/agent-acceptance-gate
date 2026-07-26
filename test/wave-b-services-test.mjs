@@ -1337,7 +1337,8 @@ const BASE = 'https://gate.example.com';
   assert.equal(audit.leaderboard_profit.amount_usd, 15);
   assert.equal(audit.positions_cash_pnl.total_cash_pnl_usd, 13);
   assert.equal(audit.divergence_verdict, 'aligned');
-  assert.equal(audit.action, 'trust_for_copy');
+  // Quick must NOT claim trust_for_copy — only full cashflow replay may.
+  assert.equal(audit.action, 'quick_triage_ok');
   assert.equal(audit.value_loop.paid_value_tier, 'A_tier_audit');
   assert.equal(audit.activity_hint.trade_rows_first_page, 2);
 

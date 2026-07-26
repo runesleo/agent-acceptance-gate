@@ -122,8 +122,10 @@ export function buildPmWalletReportFallback(input = {}) {
 
 function chooseCompositeAction(pnl, brier) {
   if (pnl?.action === 'distrust_claims') return 'distrust_claims';
+  // Only full cashflow trust_for_copy may lift composite; quick_triage_ok stays manual.
   if (pnl?.action === 'trust_for_copy' && brier?.rating === 'good') return 'trust_for_copy';
   if (pnl?.action === 'trust_for_copy') return 'trust_with_calibration_check';
+  if (pnl?.action === 'quick_triage_ok') return 'verify_manually';
   return 'verify_manually';
 }
 
