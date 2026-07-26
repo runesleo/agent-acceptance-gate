@@ -283,7 +283,7 @@ export const SERVICE_CATALOG = {
   // Code-ready; NOT on OKX until Leo authorize create/activate
   '/pm-market-scan': {
     service_id: 'pm_market_scan',
-    okx_service_id: null,
+    okx_service_id: 37171,
     title: '市场扫描 / PM Market Scan',
     category: 'finance',
     fee_usdt: '0.1',
@@ -292,7 +292,7 @@ export const SERVICE_CATALOG = {
   },
   '/pm-market-health': {
     service_id: 'pm_market_health',
-    okx_service_id: null,
+    okx_service_id: 37172,
     title: '盘口健康 / PM Market Health',
     category: 'finance',
     fee_usdt: '0.1',
@@ -301,7 +301,7 @@ export const SERVICE_CATALOG = {
   },
   '/pm-wallet-report': {
     service_id: 'pm_wallet_report',
-    okx_service_id: null,
+    okx_service_id: 37173,
     title: '钱包一页纸 / PM Wallet Report',
     category: 'finance',
     fee_usdt: '0.15',
@@ -310,7 +310,7 @@ export const SERVICE_CATALOG = {
   },
   '/pm-updown-readout': {
     service_id: 'pm_updown_readout',
-    okx_service_id: null,
+    okx_service_id: 37174,
     title: '涨跌盘读出 / PM Up/Down Readout',
     category: 'finance',
     fee_usdt: '0.1',
@@ -490,6 +490,30 @@ export const OKX_LISTING_COPY = {
     serviceDescription:
       'Polymarket PnL trust gate: quick LB vs position cashPnL, or mode=full Worker-safe cashflow replay (TRADE/REDEEM/MERGE/SPLIT/REBATE/… ) with honest pagination_incomplete. Data only.\n'
       + 'Polymarket PnL 审计：quick 对比排行榜与持仓 cashPnL；mode=full 做现金回流（含分页 incomplete 诚实标记）。输入 address/username；只读不下单。'
+  },
+  37171: {
+    serviceName: '市场扫描 / PM Market Scan',
+    serviceDescription:
+      'Read-only Polymarket market scanner: rank active books by 24h volume and spread (toolkit pm scan). Optional query + min_volume + limit. Not a buy tip.\n'
+      + '市场扫描：按 24h 成交量与价差筛活跃盘（toolkit pm scan）。输入可选 query + min_volume + limit；只读不下单。'
+  },
+  37172: {
+    serviceName: '盘口健康 / PM Market Health',
+    serviceDescription:
+      'Read-only book health: spread, depth proxies, yes/no overround for one market or event. Flags wide/thin/incoherent books. Not a buy tip.\n'
+      + '盘口健康：价差/深度/overround 快照（单盘或同场）。宽价差或 incoherent 会标出。输入 market_url/slug/event_slug；只读不下单。'
+  },
+  37173: {
+    serviceName: '钱包一页纸 / PM Wallet Report',
+    serviceDescription:
+      'Composed wallet one-pager: profile + Brier calibration + PnL audit (quick/full) in one JSON. Copy-trust composite; data only.\n'
+      + '钱包一页纸：画像 + Brier 校准 + PnL 审计（quick/full）合成。输出 composite_action；输入 address/username；只读不下单。'
+  },
+  37174: {
+    serviceName: '涨跌盘读出 / PM Up/Down Readout',
+    serviceDescription:
+      'Crypto up/down event surface from Gamma with resolution-source pitfalls (toolkit pm updown). Verify settlement rules before pricing. Not a buy tip.\n'
+      + '涨跌盘读出：Gamma 涨跌事件面 + 结算源陷阱提示（toolkit pm updown）。先核结算定义再谈价。输入 event_slug 或 query；只读不下单。'
   }
 };
 
@@ -597,30 +621,10 @@ export const PENDING_OKX_LISTING_COPY = {
       'Pre-trade decision gate: preflight + optional event context → opportunity_state + skip/watch/eligible_for_manual_review; optional size_usd/bankroll_usd → order_quantity_shares (share-first). Replay before each order. Not a buy tip; no orders.\n'
       + '预测市场决策卡：机械检查+事件上下文 → opportunity_state + 跳过/观望/可人工复核；可选 size/bankroll → shares。每次下单前重跑；非买点、不下单。'
   },
-  pm_market_scan: {
-    serviceName: '市场扫描 / PM Market Scan',
-    serviceDescription:
-      'Read-only Polymarket market scanner: rank active books by 24h volume and spread (toolkit pm scan). Optional query + min_volume + limit. Not a buy tip.\n'
-      + '市场扫描：按 24h 成交量与价差筛活跃盘（toolkit pm scan）。输入可选 query + min_volume + limit；只读不下单。'
-  },
-  pm_market_health: {
-    serviceName: '盘口健康 / PM Market Health',
-    serviceDescription:
-      'Read-only book health: spread, depth proxies, yes/no overround for one market or event. Flags wide/thin/incoherent books. Not a buy tip.\n'
-      + '盘口健康：价差/深度/overround 快照（单盘或同场）。宽价差或 incoherent 会标出。输入 market_url/slug/event_slug；只读不下单。'
-  },
-  pm_wallet_report: {
-    serviceName: '钱包一页纸 / PM Wallet Report',
-    serviceDescription:
-      'Composed wallet one-pager: profile + Brier calibration + PnL audit (quick/full) in one JSON. Copy-trust composite; data only.\n'
-      + '钱包一页纸：画像 + Brier 校准 + PnL 审计（quick/full）合成。输出 composite_action；输入 address/username；只读不下单。'
-  },
-  pm_updown_readout: {
-    serviceName: '涨跌盘读出 / PM Up/Down Readout',
-    serviceDescription:
-      'Crypto up/down event surface from Gamma with resolution-source pitfalls (toolkit pm updown). Verify settlement rules before pricing. Not a buy tip.\n'
-      + '涨跌盘读出：Gamma 涨跌事件面 + 结算源陷阱提示（toolkit pm updown）。先核结算定义再谈价。输入 event_slug 或 query；只读不下单。'
-  },
+  pm_market_scan: OKX_LISTING_COPY[37171],
+  pm_market_health: OKX_LISTING_COPY[37172],
+  pm_wallet_report: OKX_LISTING_COPY[37173],
+  pm_updown_readout: OKX_LISTING_COPY[37174],
   crypto_market_regime_radar: OKX_LISTING_COPY[30211],
   world_cup_upset_alert: OKX_LISTING_COPY[30212],
   token_dd_verdict: OKX_LISTING_COPY[30213],
