@@ -1102,13 +1102,72 @@ const BASE = 'https://gate.example.com';
     { fetchImpl: mockDc }
   );
   assert.equal(card.service_id, 'pm_decision_card');
+  assert.equal(card.schema_version, '0.3');
   assert.ok(['skip', 'watch', 'eligible_for_manual_review'].includes(card.action));
+  assert.ok(['no_edge', 'data_blocked', 'manual_micro_validation', 'strong_micro_candidate', 'event_outcome'].includes(card.opportunity_state));
+  assert.ok(['event_outcome', 'price_edge', 'no_trade'].includes(card.decision_mode));
+  assert.equal(card.threshold_source, 'asp_public_heuristic');
+  assert.equal(card.threshold_version, 'v0.3');
+  assert.ok(['cheap', 'acceptable', 'full', 'rich', 'no_edge'].includes(card.price_status));
+  assert.equal(card.hard_gate, 'no_orders_no_signing_no_wallet_custody_no_leo_private_bankroll');
+  assert.ok(Array.isArray(card.missing_evidence));
+  assert.ok(['ok', 'conflict', 'incomplete'].includes(card.consistency_check));
+  assert.equal(card.decision_card?.opportunity_state, card.opportunity_state);
+  assert.ok(card.buyer_summary_en.includes('opportunity_state='));
   assert.ok(card.value_loop?.stale_after_minutes);
   assert.ok(card.value_loop?.stale_at);
   assert.ok(card.buyer_summary_en);
   assert.ok(card.paid_checks?.checks?.length >= 6);
   assert.equal(typeof card.paid_checks.pass_count, 'number');
   assert.ok(card.decision_card?.next_actions?.length >= 1);
+}
+
+// ---- unit: pm-pnl-audit -----------------------------------------------------
+
+{
+  const { assessPmPnlAuditLive } = await import('../src/pm-pnl-audit.mjs');
+  const address = '0x63ce342161250d705dc0b16df89036c8e5f9ba9a';
+  const mockPnl = async (url) => {
+    const u = String(url);
+    if (u.includes('lb-api.polymarket.com/profit')) {
+      return new Response(JSON.stringify([{
+        amount: 15,
+        name: 'demo',
+        proxyWallet: address
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('data-api.polymarket.com/positions')) {
+      return new Response(JSON.stringify([
+        { title: 'A', size: 10, avgPrice: 0.4, cashPnl: 10, currentValue: 14 },
+        { title: 'B', size: 5, avgPrice: 0.6, cashPnl: 3, currentValue: 6 }
+      ]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('data-api.polymarket.com/activity') && u.includes('MAKER_REBATE')) {
+      return new Response(JSON.stringify([{ type: 'MAKER_REBATE' }]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    if (u.includes('data-api.polymarket.com/activity') && u.includes('TRADE')) {
+      return new Response(JSON.stringify([{ type: 'TRADE' }, { type: 'TRADE' }]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+  const audit = await assessPmPnlAuditLive(
+    { address, mode: 'quick', positions_limit: 100 },
+    { fetchImpl: mockPnl }
+  );
+  assert.equal(audit.service_id, 'pm_pnl_audit');
+  assert.equal(audit.mode, 'live_quick');
+  assert.equal(audit.leaderboard_profit.amount_usd, 15);
+  assert.equal(audit.positions_cash_pnl.total_cash_pnl_usd, 13);
+  assert.equal(audit.divergence_verdict, 'aligned');
+  assert.equal(audit.action, 'trust_for_copy');
+  assert.equal(audit.value_loop.paid_value_tier, 'A_tier_audit');
+  assert.equal(audit.activity_hint.trade_rows_first_page, 2);
 }
 
 // ---- unit: scenario SKUs ---------------------------------------------------
@@ -1529,6 +1588,24 @@ globalThis.fetch = async (url) => {
       headers: { 'content-type': 'application/json' }
     });
   }
+  if (String(url).startsWith('https://lb-api.polymarket.com/')) {
+    return new Response(JSON.stringify([{ amount: 20, name: 'worker-demo', proxyWallet: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a' }]), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  if (String(url).startsWith('https://data-api.polymarket.com/positions')) {
+    return new Response(JSON.stringify([{ title: 'Worker A', size: 10, avgPrice: 0.4, cashPnl: 18, currentValue: 22 }]), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  if (String(url).startsWith('https://data-api.polymarket.com/activity')) {
+    return new Response(JSON.stringify([{ type: 'TRADE' }]), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
   throw new Error('external network disabled');
 };
 
@@ -1553,9 +1630,20 @@ try {
   assert.equal(preBody.service_id, 'pm_trade_preflight');
   assert.ok(['eligible', 'watch', 'skip'].includes(preBody.action));
 
+  const auditRes = await worker.fetch(new Request(`${BASE}/pm-pnl-audit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a', mode: 'quick' })
+  }));
+  assert.equal(auditRes.status, 200);
+  const auditBody = await auditRes.json();
+  assert.equal(auditBody.service_id, 'pm_pnl_audit');
+  assert.equal(auditBody.divergence_verdict, 'aligned');
+
   const catalog = await worker.fetch(new Request(`${BASE}/api/okx-ai-services`)).then((r) => r.json());
   assert.ok(catalog.services.some((s) => s.service_id === 'token_dd_verdict'));
   assert.ok(catalog.services.some((s) => s.service_id === 'pm_event_readout'));
+  assert.ok(catalog.services.some((s) => s.service_id === 'pm_pnl_audit'));
 
   const readRes = await worker.fetch(new Request(`${BASE}/pm-event-readout`, {
     method: 'POST',

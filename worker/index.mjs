@@ -28,6 +28,10 @@ import {
   buildPmProfileFallback
 } from '../src/pm-profile.mjs';
 import {
+  assessPmPnlAuditLive,
+  buildPmPnlAuditFallback
+} from '../src/pm-pnl-audit.mjs';
+import {
   assessAgentBudgetPreflight,
   buildAgentBudgetPreflightFallback
 } from '../src/agent-budget-preflight.mjs';
@@ -137,6 +141,10 @@ const PAID_RADAR_ROUTES = {
   '/pm-profile': {
     description: 'PM Profile — read-only Polymarket wallet snapshot (7d LB PnL + positions sample). Productized from polymarket-toolkit.',
     load: (payload) => pmProfileWithCache(payload)
+  },
+  '/pm-pnl-audit': {
+    description: 'PM PnL Audit — quick trust gate comparing LB all-time profit, position cashPnL and activity hints. Full replay is stubbed.',
+    load: (payload) => pmPnlAuditWithCache(payload)
   },
   '/pm-brier': {
     description: 'PM Brier — read-only calibration score from settled Polymarket positions (Brier). Productized from polymarket-toolkit.',
@@ -432,6 +440,21 @@ async function pmProfileWithCache(payload) {
     cacheKey: `pm-profile|${key}`,
     loadLive: () => assessPmProfileLive(payload),
     loadFallback: () => buildPmProfileFallback(payload)
+  });
+}
+
+async function pmPnlAuditWithCache(payload) {
+  const key = String(payload?.address ?? payload?.wallet ?? payload?.username ?? payload?.query ?? '').trim().toLowerCase();
+  if (!key) {
+    throw new Error('pm-pnl-audit requires address or username.');
+  }
+  const mode = String(payload?.mode ?? 'quick').trim().toLowerCase() === 'full' ? 'full' : 'quick';
+  const limit = Number.parseInt(payload?.positions_limit ?? payload?.limit, 10) || 100;
+
+  return radarWithCache({
+    cacheKey: `pm-pnl-audit|${key}|${mode}|${limit}`,
+    loadLive: () => assessPmPnlAuditLive(payload),
+    loadFallback: () => buildPmPnlAuditFallback(payload)
   });
 }
 
@@ -814,6 +837,8 @@ function samplePayloadForPath(pathname) {
       return { sport: 'football', league: 'epl', limit: 2 };
     case '/pm-profile':
       return { address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a' };
+    case '/pm-pnl-audit':
+      return { address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a', mode: 'quick' };
     case '/pm-brier':
       return { address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a', limit: 50 };
     case '/agent-budget-preflight':

@@ -57,6 +57,9 @@ export async function assessPmTradePreflightLive(input = {}, options = {}) {
       active: market.active,
       closed: market.closed,
       volume_24h_usd: market.volume_24hr,
+      best_bid: market.best_bid,
+      best_ask: market.best_ask,
+      spread: market.spread,
       outcomes: market.outcomes,
       outcome_prices: market.outcome_prices
     },

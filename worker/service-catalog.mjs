@@ -15,6 +15,7 @@ export const LISTED_SERVICE_PATHS = new Set([
   '/sports-smart-money-radar',
   '/sports-upset-alert',
   '/pm-profile',
+  '/pm-pnl-audit',
   '/content-slop-check',
   '/agent-budget-preflight',
   '/pm-brier',
@@ -156,6 +157,15 @@ export const SERVICE_CATALOG = {
     category: 'finance',
     fee_usdt: '0.05',
     fee_atomic: '50000',
+    mode: 'live'
+  },
+  '/pm-pnl-audit': {
+    service_id: 'pm_pnl_audit',
+    okx_service_id: null,
+    title: 'PM PnL Audit',
+    category: 'finance',
+    fee_usdt: '0.1',
+    fee_atomic: '100000',
     mode: 'live'
   },
   '/agent-budget-preflight': {
@@ -461,6 +471,12 @@ export const PENDING_OKX_LISTING_COPY = {
     serviceDescription:
       'Read-only Polymarket wallet snapshot: 7d leaderboard PnL + open positions sample. From public APIs / polymarket-toolkit lineage.\n'
       + 'Polymarket 钱包画像：7日榜 PnL + 持仓抽样。输入 address 或 username；只读不下单。'
+  },
+  pm_pnl_audit: {
+    serviceName: 'PM PnL Audit',
+    serviceDescription:
+      'Quick Polymarket PnL trust gate: compares LB all-time profit, position cashPnL and activity hints; full replay stubbed. Data only.\n'
+      + 'Polymarket PnL 快速审计：对比排行榜利润、持仓 cashPnL 和 activity 提示；完整流水回放后续授权再上。输入 address/username。'
   },
   agent_budget_preflight: {
     serviceName: 'Agent Budget Preflight',
