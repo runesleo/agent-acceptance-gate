@@ -25,7 +25,7 @@ New shape:
 > 别人晒 PnL，你先别抄。
 > Leo Labs 在 OKX.AI 做按次付费数据闸：
 > 晒单验真 / 同场矩阵 / 决策卡
-> Demo：看我用 75 秒讲清楚。
+> Demo：50 秒讲清楚。
 > #OKXAI
 
 Why this should travel better:

@@ -33,9 +33,9 @@ OK = (90, 210, 150)
 SCENES = [
     (
         6,
-        "昨天那种写法像服务清单，用户刷到就走。Leo Labs 现在只讲三把刀。",
+        "别人晒收益截图，先别抄。我是 Leo Labs，OKX AI 上的一人 ASP，编号三九七七，只卖三把付费数据闸。",
         "Leo Labs · OKX.AI #3977",
-        ["不要 cockpit 大词", "只讲付费前的痛", "验真 · 矩阵 · 决策卡"],
+        ["一人 ASP · 按次付费", "不是聊天 · 不是喊单", "验真 · 矩阵 · 决策卡"],
     ),
     (
         8,
@@ -57,20 +57,20 @@ SCENES = [
     ),
     (
         6,
-        "扫描器只留一拍：找活跃盘和坏盘口，不再把二十个 endpoint 当卖点念。",
+        "扫描器只留一拍：筛活跃盘、看坏价差，帮你挑盘，不当主菜。",
         "扫描器：一拍就够",
-        ["active markets", "bad spreads", "wallet one-pager"],
+        ["活跃盘扫描", "盘口健康", "钱包一页纸"],
     ),
     (
         7,
         "Agent 调一次，JSON 进，结构化结论出。信息会过期，所以适合按次付费。",
         "按次付费数据闸",
-        ["JSON in", "structured verdict out", "stale data = pay per call"],
+        ["JSON in", "structured verdict out", "会过期 = 按次付"],
     ),
     (
         7,
-        "看 demo。要试 Leo Labs，就从验真、矩阵、决策卡开始。OKX AI。",
-        "Demo CTA",
+        "不到一分钟讲完。要试 Leo Labs，从验真、矩阵、决策卡开始。话题 OKX AI。",
+        "Demo · #OKXAI",
         ["验真", "矩阵", "决策卡", "#OKXAI"],
     ),
 ]
