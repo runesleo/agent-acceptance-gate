@@ -916,6 +916,104 @@ const BASE = 'https://gate.example.com';
   assert.ok(sm.schema_version === '0.3');
 }
 
+{
+  const {
+    assessWorldCupSmartMoneyLive
+  } = await import('../src/worldcup-smart-money-live.mjs');
+  const {
+    assessWorldCupUpsetAlertLive
+  } = await import('../src/sports-upset-alert.mjs');
+
+  const footballMarkets = [{
+    conditionId: '0xfoot1',
+    slug: 'soccer-upset-yes',
+    question: 'Will the underdog win the football match?',
+    active: true,
+    closed: false,
+    volume24hr: 90000,
+    outcomes: '["Yes","No"]',
+    outcomePrices: '["0.22","0.78"]'
+  }, {
+    conditionId: '0xfoot2',
+    slug: 'soccer-other-yes',
+    question: 'Will another football match happen?',
+    active: true,
+    closed: false,
+    volume24hr: 75000,
+    outcomes: '["Yes","No"]',
+    outcomePrices: '["0.48","0.52"]'
+  }];
+
+  const mockWorldCupExpand = async (url) => {
+    const u = String(url);
+    const parsed = new URL(u);
+    if (u.includes('/events?')) {
+      const tag = parsed.searchParams.get('tag_slug');
+      if (tag === 'world-cup') {
+        return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (tag === 'soccer' || tag === 'football') {
+        return new Response(JSON.stringify([{
+          title: 'Football markets',
+          closed: false,
+          volume24hr: 165000,
+          markets: footballMarkets
+        }]), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('public-search') || u.includes('/markets?')) {
+      return new Response(JSON.stringify(u.includes('public-search') ? { events: [] } : []), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    if (u.includes('/trades?')) {
+      const market = u.includes('0xfoot1') ? '0xfoot1' : '0xfoot2';
+      const price = market === '0xfoot1' ? 0.22 : 0.48;
+      return new Response(JSON.stringify([{
+        proxyWallet: '0xcccccccccccccccccccccccccccccccccccccccc',
+        side: 'BUY',
+        size: 3000,
+        price,
+        timestamp: 1_700_000_200,
+        outcome: 'Yes',
+        conditionId: market
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('lb-api')) {
+      return new Response(JSON.stringify([{ amount: 1500 }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/positions?')) {
+      return new Response(JSON.stringify([{ totalBought: 3000, avgPrice: 0.22, cashPnl: 5 }]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+
+  const radar = await assessWorldCupSmartMoneyLive(
+    { query: 'all', limit: 3 },
+    { fetchImpl: mockWorldCupExpand }
+  );
+  assert.equal(radar.source.scope_expanded, true);
+  assert.equal(radar.source.requested_scope, 'world_cup');
+  assert.equal(radar.source.effective_scope, 'football');
+  assert.ok(radar.buyer_summary_en.includes('expanded'));
+  assert.ok(radar.signals.length >= 1);
+
+  const upset = await assessWorldCupUpsetAlertLive(
+    { query: 'all', limit: 3, max_prob: 0.35 },
+    { fetchImpl: mockWorldCupExpand }
+  );
+  assert.equal(upset.source.discovery.scope_expanded, true);
+  assert.equal(upset.source.discovery.requested_scope, 'world_cup');
+  assert.equal(upset.source.discovery.effective_scope, 'football');
+  assert.ok(upset.buyer_summary_en.includes('expanded'));
+  assert.ok(upset.upset_alerts.length >= 1);
+}
+
 // ---- unit: nba category plugin ---------------------------------------------
 
 {
@@ -1096,6 +1194,84 @@ const BASE = 'https://gate.example.com';
   assert.equal(weatherFallback.service_id, 'weather_event_readout');
 }
 
+{
+  const { assessWeatherEventReadoutLive } = await import('../src/pm-scenario-skus.mjs');
+  const weatherMarket = {
+    conditionId: '0xweather1',
+    slug: 'nyc-high-temp-july-26',
+    question: 'Will NYC high temperature be 90°F or above on July 26?',
+    outcomes: '["Yes","No"]',
+    outcomePrices: '["0.44","0.56"]',
+    volume24hr: 125000,
+    active: true,
+    closed: false,
+    events: [{ id: 'weather-parent', slug: 'nyc-high-temp-july-26-event', title: 'NYC High Temperature July 26' }]
+  };
+  const weatherEvent = [{
+    id: 'weather-parent',
+    slug: 'nyc-high-temp-july-26-event',
+    title: 'NYC High Temperature July 26',
+    closed: false,
+    markets: [weatherMarket]
+  }];
+
+  const mockCategoryDefault = async (url) => {
+    const u = String(url);
+    const parsed = new URL(u);
+    if (u.includes('/public-search')) {
+      return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/events?') && parsed.searchParams.get('tag_slug') === 'weather') {
+      return new Response(JSON.stringify(weatherEvent), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/markets?slug=nyc-high-temp-july-26')) {
+      return new Response(JSON.stringify([weatherMarket]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/events?') && parsed.searchParams.get('slug') === 'nyc-high-temp-july-26-event') {
+      return new Response(JSON.stringify(weatherEvent), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/events?')) {
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+
+  const weather = await assessWeatherEventReadoutLive(
+    { query: 'impossible caller query' },
+    { fetchImpl: mockCategoryDefault }
+  );
+  assert.equal(weather.mode, 'live');
+  assert.equal(weather.category, 'weather');
+  assert.equal(weather.scenario.resolved_via, 'category_default');
+  assert.equal(weather.input.slug, 'nyc-high-temp-july-26');
+}
+
+{
+  const { assessWeatherEventReadoutLive } = await import('../src/pm-scenario-skus.mjs');
+  const mockNoMarkets = async (url) => {
+    const u = String(url);
+    if (u.includes('/public-search')) {
+      return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/events?') || u.includes('/markets?')) {
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+
+  const unavailable = await assessWeatherEventReadoutLive(
+    { query: 'no such weather market' },
+    { fetchImpl: mockNoMarkets }
+  );
+  assert.equal(unavailable.service_id, 'weather_event_readout');
+  assert.equal(unavailable.mode, 'live');
+  assert.equal(unavailable.capability_status, 'no_active_markets');
+  assert.equal(unavailable.action, 'unavailable');
+  assert.ok(unavailable.buyer_summary_zh.includes('没有找到'));
+  assert.ok(unavailable.buyer_summary_en.includes('No active'));
+  assert.ok(unavailable.paid_checks.fail_count >= 1);
+}
+
 // ---- unit: finance-cockpit -------------------------------------------------
 
 {
@@ -1195,6 +1371,13 @@ globalThis.fetch = async (url) => {
   if (String(url).startsWith('https://web3.okx.com/')) {
     throw new Error('x402 should not run in this test');
   }
+  if (String(url).startsWith('https://gamma-api.polymarket.com/')) {
+    const u = String(url);
+    return new Response(JSON.stringify(u.includes('/public-search') ? { events: [] } : []), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
   throw new Error('external network disabled');
 };
 
@@ -1231,6 +1414,18 @@ try {
   assert.equal(readRes.status, 200);
   const readBody = await readRes.json();
   assert.equal(readBody.service_id, 'pm_event_readout');
+
+  const weatherUnavailableRes = await worker.fetch(new Request(`${BASE}/weather-event-readout`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query: 'no active weather markets in test' })
+  }));
+  assert.equal(weatherUnavailableRes.status, 200);
+  const weatherUnavailable = await weatherUnavailableRes.json();
+  assert.equal(weatherUnavailable.service_id, 'weather_event_readout');
+  assert.equal(weatherUnavailable.mode, 'live');
+  assert.equal(weatherUnavailable.capability_status, 'no_active_markets');
+  assert.equal(weatherUnavailable.action, 'unavailable');
 
   const verifyRes = await worker.fetch(new Request(`${BASE}/content-verify-claims`, {
     method: 'POST',

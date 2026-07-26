@@ -754,15 +754,33 @@ async function radarWithCache({ cacheKey, loadLive, loadFallback }) {
   } catch (error) {
     // Never 5xx a paid call: serve stale cache first, then degraded demo data.
     if (cached) {
-      return { ...cached.payload, cache: 'stale', mode: 'degraded_stale_cache' };
+      return {
+        ...cached.payload,
+        cache: 'stale',
+        mode: 'degraded_stale_cache',
+        capability_status: 'upstream_degraded',
+        caveats: [
+          `Live upstream fetch failed (${error instanceof Error ? error.message : String(error)}); serving stale cached live data.`,
+          'Treat this as stale evidence and retry shortly before acting.',
+          ...(cached.payload.caveats || [])
+        ]
+      };
     }
     const fallback = loadFallback();
     fallback.mode = 'degraded';
+    fallback.capability_status = 'upstream_degraded';
+    fallback.action = fallback.action ?? 'retry_later';
+    fallback.live_data_status = 'unavailable';
     fallback.caveats = [
-      `Live upstream fetch failed (${error instanceof Error ? error.message : String(error)}); serving static fallback data.`,
-      'Do not trade on this response. Retry shortly for live data.',
+      `Live upstream fetch failed (${error instanceof Error ? error.message : String(error)}); serving static fallback data only.`,
+      'This is not a live market readout. Do not treat sample/static fields as current capability output; retry shortly for live data.',
       ...fallback.caveats
     ];
+    fallback.source = {
+      ...(fallback.source || {}),
+      provider: fallback.source?.provider ?? 'static_fallback',
+      degraded_reason: 'upstream_fetch_failed'
+    };
     return fallback;
   }
 }

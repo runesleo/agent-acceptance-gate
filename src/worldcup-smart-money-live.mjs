@@ -67,11 +67,14 @@ export async function assessSportsSmartMoneyLive(input = {}, options = {}) {
 
   const { markets, usedFallback, discovery } = await resolveSportsMarkets(fetchImpl, scope);
 
-  const fallbackCaveat = usedFallback
+  const expansionCaveat = discovery?.scope_expanded
+    ? `No active ${discovery.requested_scope} markets matched; expanded live discovery to ${discovery.effective_scope} sports markets.`
+    : null;
+  const fallbackCaveat = expansionCaveat || (usedFallback
     ? (options.legacyWorldCup
       ? 'No active World Cup markets matched; fell back to Polymarket top-volume markets site-wide.'
       : `No active ${scope.label} markets matched; fell back to Polymarket top-volume / search.`)
-    : null;
+    : null);
 
   return buildLiveResponse({
     serviceId,
@@ -85,7 +88,17 @@ export async function assessSportsSmartMoneyLive(input = {}, options = {}) {
     },
     fallbackCaveat,
     scan: await scanMarketsForSmartMoney(fetchImpl, markets, limit),
-    extraSource: { discovery, scope: scope.label }
+    extraSource: {
+      discovery,
+      scope: discovery?.effective_scope ?? scope.label,
+      ...(discovery?.scope_expanded
+        ? {
+          scope_expanded: true,
+          requested_scope: discovery.requested_scope,
+          effective_scope: discovery.effective_scope
+        }
+        : {})
+    }
   });
 }
 
@@ -229,6 +242,7 @@ function buildWalletCohort(aggregates, pnlCache = new Map()) {
 function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan, extraSource = null }) {
   const { scanned, enriched, wallet_cohort = [] } = scan;
   const missingPnl = enriched.some((signal) => signal.seven_day_pnl_usdt === null);
+  const summary = buildSummary(enriched, wallet_cohort);
 
   const caveats = [...STANDARD_CAVEATS];
   if (fallbackCaveat) {
@@ -248,7 +262,9 @@ function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan, extraSo
     mode: 'live',
     generated_at: new Date().toISOString(),
     input: inputEcho,
-    summary: buildSummary(enriched, wallet_cohort),
+    buyer_summary_zh: buildSmartMoneyBuyerSummaryZh(summary, extraSource),
+    buyer_summary_en: buildSmartMoneyBuyerSummaryEn(summary, extraSource),
+    summary,
     signals: enriched,
     wallet_cohort,
     caveats,
@@ -352,6 +368,7 @@ export async function resolveSportsMarkets(fetchImpl, scopeInput) {
       markets = flattenEventMarkets(Array.isArray(events) ? events : []);
       if (markets.length) {
         discovery.method = `tag_slug:${tag}`;
+        maybeMarkScopeExpansion(discovery, scope, tag);
         break;
       }
     } catch {
@@ -363,6 +380,9 @@ export async function resolveSportsMarkets(fetchImpl, scopeInput) {
     const filtered = markets.filter((market) =>
       normalizeText(`${market.market_id} ${market.title} ${market.event_title} ${market.slug}`).includes(scope.query));
     if (filtered.length) {
+      if (discovery.method) {
+        maybeMarkScopeExpansion(discovery, scope, discovery.method.replace(/^tag_slug:/, ''));
+      }
       return { markets: filtered, usedFallback: false, discovery };
     }
   }
@@ -388,6 +408,7 @@ export async function resolveSportsMarkets(fetchImpl, scopeInput) {
       markets = flattenEventMarkets(Array.isArray(result?.events) ? result.events : []);
       if (markets.length) {
         discovery.method = `public-search:${term}`;
+        maybeMarkScopeExpansion(discovery, scope, term);
         return { markets, usedFallback: false, discovery };
       }
     } catch {
@@ -406,6 +427,30 @@ export async function resolveSportsMarkets(fetchImpl, scopeInput) {
   return { markets: fallbackMarkets, usedFallback: true, discovery };
 }
 
+function maybeMarkScopeExpansion(discovery, scope, selectedToken) {
+  if (!isWorldCupScope(scope)) return;
+  const token = normalizeText(selectedToken).replace(/^tag_slug:|^public-search:/, '');
+  if (token === 'world-cup' || token === 'world_cup' || token === 'worldcup') return;
+  discovery.scope_expanded = true;
+  discovery.requested_scope = 'world_cup';
+  discovery.effective_scope = inferExpandedSportsScope(token);
+}
+
+function isWorldCupScope(scope) {
+  return scope?.league === 'world_cup'
+    || scope?.sport === 'world_cup'
+    || scope?.sport === 'worldcup'
+    || scope?.tag_slug === 'world-cup'
+    || (scope?.tag_candidates || []).includes('world-cup');
+}
+
+function inferExpandedSportsScope(token) {
+  if (/soccer|football|epl|premier|ucl|champions|la-liga|serie-a|bundesliga|mls/.test(token)) {
+    return 'football';
+  }
+  return 'sports';
+}
+
 /**
  * Find active World Cup markets via Gamma events; fall back to site-wide
  * top-volume markets when nothing matches.
@@ -418,7 +463,11 @@ async function resolveMarkets(fetchImpl, marketHint) {
     tag_slug: 'world-cup',
     query: marketHint === 'all' ? '' : marketHint
   });
-  return { markets: resolved.markets, usedFallback: resolved.usedFallback };
+  return {
+    markets: resolved.markets,
+    usedFallback: resolved.usedFallback,
+    discovery: resolved.discovery
+  };
 }
 
 /**
@@ -676,6 +725,20 @@ function buildSummary(signals, walletCohort = []) {
   const cross = walletCohort.filter((w) => w.cross_market).length;
   const cohortNote = cross > 0 ? ` Cross-market cohort: ${cross} wallet(s).` : '';
   return `${signals.length} smart-money movements found. Top signal: ${top.action} on ${top.side} in ${top.market_title}.${cohortNote}`;
+}
+
+function buildSmartMoneyBuyerSummaryZh(summary, source) {
+  if (source?.scope_expanded) {
+    return `请求范围 ${source.requested_scope} 当前无活跃市场，已自动扩展到 ${source.effective_scope} 体育市场并返回真实 Polymarket 大额交易信号。${summary}`;
+  }
+  return `已扫描真实 Polymarket 市场的大额 taker 交易。${summary}`;
+}
+
+function buildSmartMoneyBuyerSummaryEn(summary, source) {
+  if (source?.scope_expanded) {
+    return `Requested ${source.requested_scope} had no active markets, so live discovery expanded to ${source.effective_scope} sports markets and returned real Polymarket large-trade signals. ${summary}`;
+  }
+  return `Scanned real Polymarket markets for large taker trades. ${summary}`;
 }
 
 async function fetchJson(fetchImpl, url) {

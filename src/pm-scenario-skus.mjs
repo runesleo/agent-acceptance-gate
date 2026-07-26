@@ -16,6 +16,9 @@ const SCENARIOS = {
     service_id: 'weather_event_readout',
     expected: ['weather'],
     default_query: 'temperature high',
+    query_variants: ['temperature high', 'high temperature', 'weather', 'temperature'],
+    tag_slugs: ['weather'],
+    category_keywords: ['weather', 'temperature', 'high temperature'],
     zh_name: '天气温度阶梯',
     sample: {
       query: 'temperature',
@@ -26,6 +29,9 @@ const SCENARIOS = {
     service_id: 'politics_event_readout',
     expected: ['politics'],
     default_query: 'presidential election',
+    query_variants: ['presidential election', 'election', 'politics', 'senate', 'governor'],
+    tag_slugs: ['politics', 'elections'],
+    category_keywords: ['politics', 'election', 'presidential election', 'senate'],
     zh_name: '政治选举盘口',
     sample: { query: 'president' }
   },
@@ -33,6 +39,9 @@ const SCENARIOS = {
     service_id: 'macro_fed_readout',
     expected: ['macro_fed'],
     default_query: 'fed interest rates',
+    query_variants: ['fed interest rates', 'fed decision', 'fomc', 'interest rates', 'rate cut'],
+    tag_slugs: ['fed', 'federal-reserve', 'economics', 'macro'],
+    category_keywords: ['fed', 'fomc', 'interest rates', 'rate cut', 'rate hike'],
     zh_name: '美联储利率宏观',
     sample: { query: 'fed rates' }
   },
@@ -40,6 +49,9 @@ const SCENARIOS = {
     service_id: 'football_match_card',
     expected: ['football'],
     default_query: 'premier league',
+    query_variants: ['premier league', 'football', 'soccer', 'champions league', 'epl'],
+    tag_slugs: ['soccer', 'football', 'epl', 'premier-league', 'ucl', 'champions-league'],
+    category_keywords: ['football', 'soccer', 'premier league', 'uefa', 'fifa'],
     zh_name: '足球比赛卡',
     sample: {
       query: 'premier league',
@@ -50,6 +62,9 @@ const SCENARIOS = {
     service_id: 'tennis_match_card',
     expected: ['tennis'],
     default_query: 'atp tennis',
+    query_variants: ['atp tennis', 'tennis', 'atp', 'wta', 'wimbledon'],
+    tag_slugs: ['tennis', 'atp', 'wta'],
+    category_keywords: ['tennis', 'atp', 'wta', 'wimbledon'],
     zh_name: '网球比赛卡',
     sample: {
       query: 'atp',
@@ -60,6 +75,9 @@ const SCENARIOS = {
     service_id: 'nba_match_card',
     expected: ['nba'],
     default_query: 'nba',
+    query_variants: ['nba', 'basketball', 'nba finals', 'lakers', 'celtics'],
+    tag_slugs: ['nba', 'basketball'],
+    category_keywords: ['nba', 'basketball', 'wnba'],
     zh_name: 'NBA 比赛卡',
     sample: {
       query: 'nba',
@@ -120,6 +138,9 @@ async function assessScenarioSkuLive(scenarioKey, input = {}, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
 
   const resolvedInput = await resolveScenarioInput(input, spec, fetchImpl);
+  if (resolvedInput._unavailable) {
+    return buildScenarioUnavailable(spec, input, resolvedInput);
+  }
   const base = await assessPmEventReadoutLive(resolvedInput, {
     ...options,
     fetchImpl,
@@ -191,29 +212,179 @@ async function resolveScenarioInput(input, spec, fetchImpl) {
   }
 
   const query = String(input.query ?? input.market ?? input.topic ?? spec.default_query).trim();
-  if (!query) {
-    throw new Error(`${spec.service_id} requires market_url, slug, condition_id, or query.`);
+  const queryDiscovery = await discoverSlug(fetchImpl, buildQueryVariants(query, spec), spec.expected);
+  if (queryDiscovery.slug) {
+    return {
+      ...input,
+      slug: queryDiscovery.slug,
+      _resolved_via: queryDiscovery.query === query ? 'public_search' : 'query_variant',
+      _query: query,
+      _discovery: queryDiscovery.discovery
+    };
   }
 
-  const slug = await discoverSlug(fetchImpl, query, spec.expected);
-  if (!slug) {
-    throw new Error(`No active ${spec.zh_name} market matched query "${query}". Pass an explicit slug/market_url.`);
+  const categoryDiscovery = await discoverCategoryDefault(fetchImpl, spec);
+  if (categoryDiscovery.slug) {
+    return {
+      ...input,
+      slug: categoryDiscovery.slug,
+      _resolved_via: 'category_default',
+      _query: query || spec.default_query,
+      _discovery: {
+        query_attempts: queryDiscovery.discovery,
+        category_default: categoryDiscovery.discovery
+      }
+    };
   }
+
+  if (!queryDiscovery.hadSuccessfulFetch && !categoryDiscovery.hadSuccessfulFetch) {
+    const detail = queryDiscovery.errors[0] || categoryDiscovery.errors[0] || 'unknown upstream failure';
+    throw new Error(`Scenario discovery upstream unavailable for ${spec.service_id}: ${detail}`);
+  }
+
   return {
     ...input,
-    slug,
-    _resolved_via: 'public_search',
-    _query: query
+    _unavailable: true,
+    _resolved_via: 'no_active_markets',
+    _query: query || spec.default_query,
+    _discovery: {
+      query_attempts: queryDiscovery.discovery,
+      category_default: categoryDiscovery.discovery
+    }
   };
 }
 
-async function discoverSlug(fetchImpl, query, expectedCategories) {
-  const result = await fetchJson(
-    fetchImpl,
-    `${GAMMA_BASE}/public-search?q=${encodeURIComponent(query)}&events_status=active&limit_per_type=12`
-  ).catch(() => null);
+async function discoverSlug(fetchImpl, queryVariants, expectedCategories) {
+  const discovery = { method: null, query_variants: [], candidates_seen: 0 };
+  const errors = [];
+  let hadSuccessfulFetch = false;
 
-  const events = Array.isArray(result?.events) ? result.events : [];
+  for (const query of queryVariants) {
+    discovery.query_variants.push(query);
+    try {
+      const result = await fetchJson(
+        fetchImpl,
+        `${GAMMA_BASE}/public-search?q=${encodeURIComponent(query)}&events_status=active&limit_per_type=12`
+      );
+      hadSuccessfulFetch = true;
+      const candidates = collectEventMarketCandidates(
+        Array.isArray(result?.events) ? result.events : [],
+        expectedCategories
+      );
+      discovery.candidates_seen += candidates.length;
+      const best = pickBestCandidate(candidates);
+      if (best) {
+        return {
+          slug: best.slug,
+          query,
+          discovery: { ...discovery, method: `public-search:${query}`, selected: best.slug },
+          hadSuccessfulFetch,
+          errors
+        };
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return { slug: null, query: null, discovery, hadSuccessfulFetch, errors };
+}
+
+async function discoverCategoryDefault(fetchImpl, spec) {
+  const discovery = {
+    method: null,
+    tag_slugs: [],
+    category_keywords: [],
+    candidates_seen: 0
+  };
+  const errors = [];
+  let hadSuccessfulFetch = false;
+
+  for (const tag of spec.tag_slugs || []) {
+    discovery.tag_slugs.push(tag);
+    try {
+      const events = await fetchJson(
+        fetchImpl,
+        `${GAMMA_BASE}/events?closed=false&active=true&limit=25&order=volume24hr&ascending=false&tag_slug=${encodeURIComponent(tag)}`
+      );
+      hadSuccessfulFetch = true;
+      const candidates = collectEventMarketCandidates(Array.isArray(events) ? events : [], spec.expected);
+      discovery.candidates_seen += candidates.length;
+      const best = pickBestCandidate(candidates);
+      if (best) {
+        return {
+          slug: best.slug,
+          discovery: { ...discovery, method: `tag_slug:${tag}`, selected: best.slug },
+          hadSuccessfulFetch,
+          errors
+        };
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  for (const keyword of spec.category_keywords || []) {
+    discovery.category_keywords.push(keyword);
+    try {
+      const result = await fetchJson(
+        fetchImpl,
+        `${GAMMA_BASE}/public-search?q=${encodeURIComponent(keyword)}&events_status=active&limit_per_type=12`
+      );
+      hadSuccessfulFetch = true;
+      const candidates = collectEventMarketCandidates(
+        Array.isArray(result?.events) ? result.events : [],
+        spec.expected
+      );
+      discovery.candidates_seen += candidates.length;
+      const best = pickBestCandidate(candidates);
+      if (best) {
+        return {
+          slug: best.slug,
+          discovery: { ...discovery, method: `category_keyword:${keyword}`, selected: best.slug },
+          hadSuccessfulFetch,
+          errors
+        };
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  try {
+    const rows = await fetchJson(
+      fetchImpl,
+      `${GAMMA_BASE}/markets?closed=false&active=true&limit=50&order=volume24hr&ascending=false`
+    );
+    hadSuccessfulFetch = true;
+    const candidates = collectMarketCandidates(Array.isArray(rows) ? rows : [], spec.expected);
+    discovery.candidates_seen += candidates.length;
+    const best = pickBestCandidate(candidates);
+    if (best) {
+      return {
+        slug: best.slug,
+        discovery: { ...discovery, method: 'top_volume_category_filter', selected: best.slug },
+        hadSuccessfulFetch,
+        errors
+      };
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
+  return { slug: null, discovery, hadSuccessfulFetch, errors };
+}
+
+function buildQueryVariants(query, spec) {
+  return uniqueStrings([
+    query,
+    ...(spec.query_variants || []),
+    spec.default_query,
+    ...(spec.expected || [])
+  ]);
+}
+
+function collectEventMarketCandidates(events, expectedCategories) {
   const candidates = [];
   for (const event of events) {
     if (event?.closed) continue;
@@ -221,17 +392,103 @@ async function discoverSlug(fetchImpl, query, expectedCategories) {
     for (const market of event.markets || []) {
       if (!market?.slug || market.closed || market.active === false) continue;
       const blob = `${eventBlob} ${market.question || ''} ${market.slug || ''}`.toLowerCase();
-      const score = scoreCategoryMatch(blob, expectedCategories) + Math.min(toNumber(market.volume24hr) / 100000, 3);
-      candidates.push({ slug: market.slug, score, volume: toNumber(market.volume24hr) });
-    }
-    // Also allow event slug if markets missing slug
-    if (event.slug) {
-      const score = scoreCategoryMatch(eventBlob, expectedCategories) + Math.min(toNumber(event.volume24hr) / 100000, 2);
-      candidates.push({ slug: event.slug, score, volume: toNumber(event.volume24hr) });
+      const categoryScore = scoreCategoryMatch(blob, expectedCategories);
+      if (categoryScore <= 0) continue;
+      const volume = toNumber(market.volume24hr ?? market.volumeNum ?? market.volume ?? event.volume24hr);
+      candidates.push({
+        slug: market.slug,
+        score: categoryScore + Math.min(volume / 100000, 3),
+        volume
+      });
     }
   }
-  candidates.sort((a, b) => b.score - a.score || b.volume - a.volume);
-  return candidates[0]?.slug || null;
+  return candidates;
+}
+
+function collectMarketCandidates(markets, expectedCategories) {
+  const candidates = [];
+  for (const market of markets) {
+    if (!market?.slug || market.closed || market.active === false) continue;
+    const blob = `${market.question || ''} ${market.slug || ''} ${market.description || ''}`.toLowerCase();
+    const categoryScore = scoreCategoryMatch(blob, expectedCategories);
+    if (categoryScore <= 0) continue;
+    const volume = toNumber(market.volume24hr ?? market.volumeNum ?? market.volume);
+    candidates.push({
+      slug: market.slug,
+      score: categoryScore + Math.min(volume / 100000, 3),
+      volume
+    });
+  }
+  return candidates;
+}
+
+function pickBestCandidate(candidates) {
+  return candidates
+    .slice()
+    .sort((a, b) => b.score - a.score || b.volume - a.volume)[0] ?? null;
+}
+
+function buildScenarioUnavailable(spec, input, resolvedInput) {
+  const query = resolvedInput._query || input.query || input.market || input.topic || spec.default_query;
+  return {
+    schema_version: '0.1',
+    service_id: spec.service_id,
+    mode: 'live',
+    generated_at: new Date().toISOString(),
+    capability_status: 'no_active_markets',
+    action: 'unavailable',
+    input: {
+      market_url: input.market_url ?? null,
+      condition_id: input.condition_id ?? null,
+      slug: input.slug ?? null,
+      query
+    },
+    scenario: {
+      id: spec.service_id,
+      zh_name: spec.zh_name,
+      expected_categories: spec.expected,
+      detected_category: null,
+      expected_ok: false,
+      resolved_via: 'no_active_markets',
+      query,
+      discovery: resolvedInput._discovery ?? null
+    },
+    buyer_summary_zh: `${spec.zh_name}：已实时检索 Polymarket，但没有找到仍活跃且匹配该品类的市场；本次结果不可用，不返回伪造比赛/天气/政治卡。`,
+    buyer_summary_en: `${spec.zh_name}: No active Polymarket markets matched this scenario after live discovery; this response is unavailable instead of a fake demo card.`,
+    paid_checks: {
+      pass_count: 2,
+      fail_count: 1,
+      checks: [
+        { id: 'live_discovery_attempted', status: 'pass', detail: 'Queried Gamma public-search, tag/category events, and top-volume category filter.' },
+        { id: 'category_market_match', status: 'fail', detail: `No active ${spec.expected.join('/')} market found.` },
+        { id: 'fake_card_suppressed', status: 'pass', detail: 'Returned structured unavailable response instead of static fallback card.' }
+      ]
+    },
+    caveats: [
+      'Data and analytics only. Not investment advice, not betting advice, and not a guarantee of future returns.',
+      'No active matching market was found at request time; retry later or pass an explicit active market_url/slug.'
+    ],
+    next_gate: 'Retry_when_active_markets_exist_or_pass_explicit_slug',
+    source: {
+      provider: 'polymarket_gamma_public_api',
+      scenario_sku: spec.service_id,
+      method: 'pm_event_readout_scenario_discovery',
+      discovery: resolvedInput._discovery ?? null
+    }
+  };
+}
+
+function uniqueStrings(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    result.push(text);
+  }
+  return result;
 }
 
 function scoreCategoryMatch(blob, expected) {

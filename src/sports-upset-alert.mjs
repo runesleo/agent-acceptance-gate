@@ -52,6 +52,7 @@ export async function assessSportsUpsetAlertLive(input = {}, options = {}) {
     const resolved = await resolveWorldCupMarkets(fetchImpl, marketHint);
     markets = resolved.markets;
     usedFallback = resolved.usedFallback;
+    discovery = resolved.discovery;
   } else {
     const resolved = await resolveSportsMarkets(fetchImpl, input);
     markets = resolved.markets;
@@ -72,7 +73,9 @@ export async function assessSportsUpsetAlertLive(input = {}, options = {}) {
     .slice(0, limit);
 
   const caveats = [...STANDARD_CAVEATS];
-  if (usedFallback) {
+  if (discovery?.scope_expanded) {
+    caveats.push(`No active ${discovery.requested_scope} markets matched; expanded live discovery to ${discovery.effective_scope} sports markets.`);
+  } else if (usedFallback) {
     caveats.push(options.legacyWorldCup
       ? 'No active World Cup markets matched; fell back to Polymarket top-volume markets site-wide.'
       : 'No active scoped sports markets matched; fell back to top-volume / search.');
@@ -94,6 +97,8 @@ export async function assessSportsUpsetAlertLive(input = {}, options = {}) {
       max_prob: maxProb,
       limit
     },
+    buyer_summary_zh: buildBuyerSummaryZh(alerts, scanned, enriched, discovery),
+    buyer_summary_en: buildBuyerSummaryEn(alerts, scanned, enriched, discovery),
     summary: buildSummary(alerts, scanned, enriched),
     upset_alerts: alerts,
     wallet_cohort: wallet_cohort.filter((w) => w.cross_market).slice(0, 5),
@@ -165,6 +170,22 @@ function buildUpsetAlert(signal, deepProb = DEEP_UPSET_PROBABILITY) {
 
 function buildSummary(alerts, scanned, enriched) {
   return `Scanned ${scanned.length} markets / ${enriched.length} smart-money candidates → ${alerts.length} upset alert(s).`;
+}
+
+function buildBuyerSummaryZh(alerts, scanned, enriched, discovery) {
+  const summary = buildSummary(alerts, scanned, enriched);
+  if (discovery?.scope_expanded) {
+    return `请求范围 ${discovery.requested_scope} 当前无活跃市场，已自动扩展到 ${discovery.effective_scope} 体育市场并返回真实 upset 扫描。${summary}`;
+  }
+  return `已扫描真实 Polymarket 体育市场的低概率大额交易。${summary}`;
+}
+
+function buildBuyerSummaryEn(alerts, scanned, enriched, discovery) {
+  const summary = buildSummary(alerts, scanned, enriched);
+  if (discovery?.scope_expanded) {
+    return `Requested ${discovery.requested_scope} had no active markets, so live discovery expanded to ${discovery.effective_scope} sports markets and returned a real upset scan. ${summary}`;
+  }
+  return `Scanned real Polymarket sports markets for low-probability large-trade entries. ${summary}`;
 }
 
 function normalizeText(value) {

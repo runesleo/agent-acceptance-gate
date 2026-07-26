@@ -281,8 +281,8 @@ export const OKX_LISTING_COPY = {
   30207: {
     serviceName: 'World Cup Smart Money Radar',
     serviceDescription:
-      'Heuristic World Cup prediction-market wallet signals from large public trades and 7-day leaderboard stats; data only.\n'
-      + '世界杯预测市场聪明钱雷达：大额成交与7日盈利钱包信号。输入 market 关键词（如 winner、队名或 all）+ limit 1-10。'
+      'Sports smart-money radar with World Cup preference: scans large public trades; if no active World Cup markets, auto-expands to football and returns live signals with scope_expanded.\n'
+      + '世界杯优先的聪明钱雷达：无活跃世界杯盘时自动扩展到足球并返回 live 信号（scope_expanded）。输入 market/all + limit 1-10。'
   },
   30208: {
     serviceName: 'Polymarket Smart Money Radar',
@@ -311,8 +311,8 @@ export const OKX_LISTING_COPY = {
   30212: {
     serviceName: 'World Cup Upset Alert',
     serviceDescription:
-      'Flags profitable wallets entering low-probability World Cup outcomes; potential upset positioning signals only.\n'
-      + '世界杯冷门预警：盈利钱包涌入低概率赛果。输入 market 关键词（winner/队名/all）+ limit 1-10；数据信号，非投注建议。'
+      'Upset alert with World Cup preference: flags profitable wallets on low-probability sides; if no active World Cup markets, auto-expands to football with scope_expanded.\n'
+      + '世界杯优先的冷门预警：无活跃世界杯盘时自动扩展到足球（scope_expanded）。输入 market/all + limit；非投注建议。'
   },
   30213: {
     serviceName: 'Token DD Verdict',
@@ -395,38 +395,38 @@ export const OKX_LISTING_COPY = {
   36675: {
     serviceName: 'Weather Event Readout',
     serviceDescription:
-      'Temperature-ladder prediction-market card: bucket surface + optional caller forecast/obs snapshot. Data only.\n'
-      + '天气温度阶梯卡：桶分布 + 可选预报/实况快照。输入 query 或 slug + 可选 weather{}；不下单、不爬站。'
+      'Live weather temperature-ladder card: discovers an active market via query (or category default), then returns bucket surface; if none, capability_status=no_active_markets.\n'
+      + '天气温度阶梯卡：用 query 发现活跃盘（否则品类默认盘）；无盘返回 no_active_markets。输入 query 或 slug；不下单。'
   },
   36676: {
     serviceName: 'Politics Event Readout',
     serviceDescription:
-      'Election/politics ladder card: candidate yes-mass leaderboard + exclusivity sanity. Data only.\n'
-      + '政治选举盘口卡：候选人 yes 质量排行 + 互斥性检查。输入 query 或 slug；不下单。'
+      'Live politics/election ladder card: query discovery or category default to an active market; exclusivity sanity; no_active_markets if none.\n'
+      + '政治选举盘口卡：query/品类默认发现活跃盘；无盘返回 no_active_markets。输入 query 或 slug；不下单。'
   },
   36677: {
     serviceName: 'Macro Fed Readout',
     serviceDescription:
-      'Fed/FOMC rate-decision market card with honest external-anchor gaps. Data only.\n'
-      + '美联储利率宏观卡：FOMC/利率盘口矩阵；外部锚定缺口如实标注。输入 query 或 slug；不下单。'
+      'Live Fed/FOMC rate card: query discovery or category default; honest external-anchor gaps; no_active_markets if none.\n'
+      + '美联储利率宏观卡：query/品类默认发现活跃盘；无盘返回 no_active_markets。输入 query 或 slug；不下单。'
   },
   36678: {
     serviceName: 'Football Match Card',
     serviceDescription:
-      'Football match evidence card: same-event matrix, fixture gate, expression comparison. Not a buy tip.\n'
-      + '足球比赛卡：同场矩阵、赛程闸门、表达比较。输入 query/slug + 可选 football{}；不下单。'
+      'Live football evidence card: query discovery or category default, then same-event matrix / expression compare; no_active_markets if none. Not a buy tip.\n'
+      + '足球比赛卡：query/品类默认发现活跃盘后给出矩阵比较；无盘返回 no_active_markets。输入 query/slug；不下单。'
   },
   36679: {
     serviceName: 'Tennis Match Card',
     serviceDescription:
-      'Tennis match evidence card: format-aware ML/set handicap/totals + domination check. Not a buy tip.\n'
-      + '网球比赛卡：赛制感知的胜负/盘口/总局数。输入 query/slug + 可选 tennis{}；不下单。'
+      'Live tennis evidence card: query discovery or category default; format-aware ML/set/totals; no_active_markets if none. Not a buy tip.\n'
+      + '网球比赛卡：query/品类默认发现活跃盘；无盘返回 no_active_markets。输入 query/slug；不下单。'
   },
   36680: {
     serviceName: 'NBA Match Card',
     serviceDescription:
-      'NBA match evidence card: moneyline/spread/totals matrix + heuristic coherence. Not a buy tip.\n'
-      + 'NBA 比赛卡：胜负/让分/总分矩阵。输入 query/slug + 可选 nba{}；不下单。'
+      'Live NBA evidence card: query discovery or category default; moneyline/spread/totals matrix; no_active_markets if none. Not a buy tip.\n'
+      + 'NBA 比赛卡：query/品类默认发现活跃盘；无盘返回 no_active_markets。输入 query/slug；不下单。'
   },
   36681: {
     serviceName: 'PM Decision Card',
