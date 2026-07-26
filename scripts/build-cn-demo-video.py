@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import subprocess
+import os
 import wave
 from pathlib import Path
 
@@ -14,6 +15,12 @@ OUT_DIR = ROOT / "research" / "demo-video-cn"
 SLIDES_DIR = OUT_DIR / "slides"
 AUDIO_DIR = OUT_DIR / "audio"
 FINAL = OUT_DIR / "leo-labs-okxai-demo-zh.mp4"
+DEFAULT_VOICE = "zh-CN-YunyangNeural"
+FALLBACK_VOICE = "zh-CN-XiaoxiaoNeural"
+DEFAULT_RATE = "+8%"
+VOICE = os.environ.get("VOICE", DEFAULT_VOICE)
+RATE = os.environ.get("RATE", DEFAULT_RATE)
+EDGE_RETRIES = 2
 
 W, H = 1280, 720
 BG = (10, 14, 22)
@@ -25,46 +32,46 @@ OK = (90, 210, 150)
 # (seconds, voiceover, title, bullets)
 SCENES = [
     (
-        10,
-        "我是一个人在做 Leo Labs，OKX AI 上的 Agent 服务商，编号三九七七。",
+        6,
+        "昨天那种写法像服务清单，用户刷到就走。Leo Labs 现在只讲三把刀。",
         "Leo Labs · OKX.AI #3977",
-        ["一人团队 · ASP", "按次付费 · 边缘即时履约", "不是聊天机器人 · 不是喊单"],
+        ["不要 cockpit 大词", "只讲付费前的痛", "验真 · 矩阵 · 决策卡"],
     ),
     (
-        14,
-        "我们卖的是给 Agent 用的数据闸：行情会过期，结论结构化输出，不下单、不托管私钥。",
-        "卖什么？",
-        ["JSON 进 → 结构化结论出", "会过期的信号与检查", "只读公开数据 · 无卖家值守"],
+        8,
+        "第一把，晒单验真。别人晒收益，先拿排行榜、持仓和现金回流对账，别被截图带节奏。",
+        "① 晒单验真",
+        ["排行榜 vs 持仓", "cashPnL / 回流对账", "截图先过闸"],
     ),
     (
-        16,
-        "第一条：晒单流水验真。对比排行榜和持仓，可选完整现金回流，用来核别人晒的成绩单。",
-        "① 晒单流水验真 · PnL 审计",
-        ["排行榜 vs 持仓 cashPnL", "full 模式诚实标 incomplete", "抄钱包前先核验"],
+        8,
+        "第二把，同场矩阵。同一场比赛的盘口一起看，价差、流动性、矛盾信号马上露出来。",
+        "② 同场矩阵",
+        ["同场盘口放一屏", "spread / volume / overround", "先看结构，再看方向"],
     ),
     (
-        16,
-        "第二条：同场盘口矩阵，和下单前决策卡。矩阵看同场结构；决策卡输出跳过、观望、或可人工复核。过关不等于买点。",
-        "② 同场矩阵 · 决策卡",
-        ["同场矩阵 / 比赛卡硬闸", "skip / watch / 可人工复核", "eligible ≠ 买入建议"],
+        8,
+        "第三把，决策卡。下单前只问三个结果：跳过、观望，还是人工复核。eligible 不等于买点。",
+        "③ 决策卡",
+        ["skip / watch / review", "硬闸先拦冲动单", "非喊单 · 非托管"],
     ),
     (
-        14,
-        "第三条：toolkit 扫描器。市场扫描筛活跃盘，盘口健康看价差和 overround，钱包一页纸合成画像。",
-        "③ 扫描器 · scan / health / wallet",
-        ["市场扫描 volume+spread", "盘口健康 overround", "钱包一页纸组合卡"],
+        6,
+        "扫描器只留一拍：找活跃盘和坏盘口，不再把二十个 endpoint 当卖点念。",
+        "扫描器：一拍就够",
+        ["active markets", "bad spreads", "wallet one-pager"],
     ),
     (
-        12,
-        "另外还有发布就绪和交付验收，给 Agent 发文、交任务前做规则检查。软件工具赛道也能对上。",
-        "④ 发布 / 交付检查",
-        ["注水与断言核查", "交付证据闸门", "对齐 Software Utility 奖"],
+        7,
+        "Agent 调一次，JSON 进，结构化结论出。信息会过期，所以适合按次付费。",
+        "按次付费数据闸",
+        ["JSON in", "structured verdict out", "stale data = pay per call"],
     ),
     (
-        12,
-        "边缘按需履约，不用笔记本一直在线。关注话题 OKX AI，欢迎试用 Leo Labs。谢谢。",
-        "按次付费 · 边缘履约",
-        ["#OKXAI", "api.leolabs.me", "谢谢观看"],
+        7,
+        "看 demo。要试 Leo Labs，就从验真、矩阵、决策卡开始。OKX AI。",
+        "Demo CTA",
+        ["验真", "矩阵", "决策卡", "#OKXAI"],
     ),
 ]
 
@@ -112,17 +119,26 @@ def wav_duration(path: Path) -> float:
         return wf.getnframes() / float(wf.getframerate())
 
 
-def say_to_aiff(text: str, aiff_path: Path) -> None:
+def edge_tts_to_mp3(text: str, mp3_path: Path, voice: str) -> None:
     subprocess.run(
-        ["say", "-v", "Tingting", "-r", "185", "-o", str(aiff_path), text],
+        [
+            "edge-tts",
+            "--voice", voice,
+            "--rate", RATE,
+            "--text", text,
+            "--write-media", str(mp3_path),
+        ],
         check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
     )
 
 
-def aiff_to_wav(aiff_path: Path, wav_path: Path) -> None:
+def audio_to_wav(audio_path: Path, wav_path: Path) -> None:
     subprocess.run(
         [
-            "ffmpeg", "-y", "-i", str(aiff_path),
+            "ffmpeg", "-y", "-i", str(audio_path),
             "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1",
             str(wav_path),
         ],
@@ -132,6 +148,38 @@ def aiff_to_wav(aiff_path: Path, wav_path: Path) -> None:
     )
 
 
+def say_tingting_to_wav(text: str, wav_path: Path) -> str:
+    aiff_path = wav_path.with_suffix(".aiff")
+    subprocess.run(
+        ["say", "-v", "Tingting", "-r", "185", "-o", str(aiff_path), text],
+        check=True,
+    )
+    audio_to_wav(aiff_path, wav_path)
+    return "Tingting"
+
+
+def narration_to_wav(text: str, mp3_path: Path, wav_path: Path) -> str:
+    voices = [VOICE]
+    if VOICE != FALLBACK_VOICE:
+        voices.append(FALLBACK_VOICE)
+
+    last_error: Exception | None = None
+    for voice in voices:
+        for attempt in range(1, EDGE_RETRIES + 1):
+            try:
+                edge_tts_to_mp3(text, mp3_path, voice)
+                audio_to_wav(mp3_path, wav_path)
+                return voice
+            except (OSError, subprocess.CalledProcessError) as exc:
+                last_error = exc
+                detail = getattr(exc, "stderr", "") or str(exc)
+                detail = detail.strip().splitlines()[-1] if detail.strip() else str(exc)
+                print(f"WARN: edge-tts failed with {voice} attempt {attempt}/{EDGE_RETRIES}: {detail}")
+
+    print(f"WARN: falling back to macOS Tingting after edge-tts failure: {last_error}")
+    return say_tingting_to_wav(text, wav_path)
+
+
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     SLIDES_DIR.mkdir(parents=True, exist_ok=True)
@@ -139,15 +187,17 @@ def main() -> None:
 
     concat_parts: list[Path] = []
     total = len(SCENES)
+    voices_used: set[str] = set()
+    print(f"TTS default: voice={VOICE} rate={RATE}")
 
     for i, (min_secs, line, title, bullets) in enumerate(SCENES, start=1):
         slide_path = SLIDES_DIR / f"slide-{i:02d}.png"
         draw_slide(title, bullets, i, total).save(slide_path)
 
-        aiff = AUDIO_DIR / f"line-{i:02d}.aiff"
+        mp3 = AUDIO_DIR / f"line-{i:02d}.mp3"
         wav = AUDIO_DIR / f"line-{i:02d}.wav"
-        say_to_aiff(line, aiff)
-        aiff_to_wav(aiff, wav)
+        voice_used = narration_to_wav(line, mp3, wav)
+        voices_used.add(voice_used)
         audio_secs = wav_duration(wav)
         # Hold slide at least min_secs, or audio length + small pad
         duration = max(float(min_secs), audio_secs + 0.45)
@@ -170,7 +220,7 @@ def main() -> None:
             stderr=subprocess.DEVNULL,
         )
         concat_parts.append(part)
-        print(f"scene {i}/{total}: {duration:.1f}s — {title}")
+        print(f"scene {i}/{total}: {duration:.1f}s — {title} — {voice_used}")
 
     list_file = OUT_DIR / "concat.txt"
     list_file.write_text("".join(f"file '{p.name}'\n" for p in concat_parts), encoding="utf-8")
@@ -201,8 +251,9 @@ def main() -> None:
     dur = float(probe.stdout.strip())
     print(f"\nDONE: {FINAL}")
     print(f"duration: {dur:.1f}s")
+    print(f"voices: {', '.join(sorted(voices_used))}")
     if dur > 90:
-        print("WARN: over 90s — trim SCENES or speed up say rate")
+        print("WARN: over 90s — trim SCENES or speed up RATE")
 
 
 if __name__ == "__main__":
