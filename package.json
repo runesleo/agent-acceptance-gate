@@ -10,10 +10,13 @@
   "scripts": {
     "audit": "node ./bin/audit-agent-deliverable.mjs",
     "audit:samples": "node ./bin/audit-agent-deliverable.mjs --samples --pretty",
+    "deploy:worker": "wrangler deploy",
     "serve": "node ./bin/serve-demo.mjs",
-    "test": "node ./test/run-samples.mjs && node ./test/schema-smoke.mjs && node ./test/http-smoke.mjs",
+    "test": "node ./test/run-samples.mjs && node ./test/schema-smoke.mjs && node ./test/http-smoke.mjs && node ./test/wave-b-services-test.mjs && node ./test/x402-worker-test.mjs",
+    "worker:check": "node --check ./worker/index.mjs",
     "test:samples": "node ./test/run-samples.mjs",
     "test:schemas": "node ./test/schema-smoke.mjs",
-    "test:http": "node ./test/http-smoke.mjs"
+    "test:http": "node ./test/http-smoke.mjs",
+    "test:x402": "node ./test/x402-worker-test.mjs"
   }
 }

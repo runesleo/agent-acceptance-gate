@@ -1,0 +1,18 @@
+name = "agent-acceptance-gate-api"
+main = "worker/index.mjs"
+compatibility_date = "2024-11-01"
+
+routes = [
+  { pattern = "api.leolabs.me", custom_domain = true }
+]
+
+[[kv_namespaces]]
+binding = "TRIAL_KV"
+id = "68a475d8f7f345d3887b571a12d44e55"
+
+# Orphaned remote DO from an earlier uncommitted deploy (2026-07-09). Local code
+# never used PaymentJournalDurableObject; delete-class clears CF dependency so
+# worker deploys can proceed.
+[[migrations]]
+tag = "v20260724-remove-payment-journal-do"
+deleted_classes = ["PaymentJournalDurableObject"]

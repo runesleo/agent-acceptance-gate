@@ -3,6 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { auditDelivery } from './auditor.mjs';
+import { assessWorldCupSmartMoney } from './worldcup-smart-money.mjs';
+import {
+  assessOkxAiDataService,
+  getOkxAiDataServiceByPath,
+  listOkxAiDataServices
+} from './okx-ai-data-services.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const demoDir = path.join(rootDir, 'demo');
@@ -27,6 +33,25 @@ export function createServer() {
         return sendJson(res, 200, audits);
       }
 
+      if (req.method === 'GET' && url.pathname === '/api/okx-ai-services') {
+        return sendJson(res, 200, {
+          schema_version: '0.1',
+          mode: 'local_launch_pack',
+          services: [
+            {
+              service_id: 'world_cup_smart_money_radar',
+              path: '/world-cup-smart-money-radar',
+              title: 'World Cup Smart Money Radar',
+              category: 'world_cup',
+              fee_usdt: '1',
+              description: 'Tracks profitable World Cup prediction-market wallets and highlights position changes.',
+              mode: 'public_safe_demo'
+            },
+            ...listOkxAiDataServices()
+          ]
+        });
+      }
+
       if (req.method === 'GET' && url.pathname === '/.well-known/agent-service.json') {
         return sendFile(res, path.join(discoveryDir, 'agent-service.json'), 'application/json; charset=utf-8');
       }
@@ -43,6 +68,21 @@ export function createServer() {
         const payload = await readJsonBody(req);
         const audit = auditDelivery(payload);
         return sendJson(res, 200, audit);
+      }
+
+      if (req.method === 'POST' && url.pathname === '/world-cup-smart-money-radar') {
+        const payload = await readJsonBody(req);
+        const report = assessWorldCupSmartMoney(payload);
+        return sendJson(res, 200, report);
+      }
+
+      if (req.method === 'POST') {
+        const service = getOkxAiDataServiceByPath(url.pathname);
+        if (service) {
+          const payload = await readJsonBody(req);
+          const report = assessOkxAiDataService(service, payload);
+          return sendJson(res, 200, report);
+        }
       }
 
       if (req.method === 'GET') {

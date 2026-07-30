@@ -7,3 +7,12 @@ coverage/
 dist/
 *.log
 
+.secrets.env
+.dev.vars
+.wrangler/
+
+# demo intermediates
+research/demo-video-cn/audio/
+research/demo-video-cn/part-*.mp4
+research/demo-video-cn/slides/
+research/demo-video-cn/concat.txt

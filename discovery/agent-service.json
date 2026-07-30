@@ -43,6 +43,34 @@
   ],
   "tools": [
     {
+      "name": "world_cup_smart_money_radar",
+      "description": "Return World Cup prediction-market smart-money movements: profitable wallet labels, position changes, side, notional size, confidence, and caveats. Data and analytics only; no trading, custody, or investment advice.",
+      "endpoint": "POST /world-cup-smart-money-radar",
+      "billable_event": "valid_world_cup_smart_money_report_generated",
+      "launch_priority": "first_okx_ai_listing_candidate"
+    },
+    {
+      "name": "polymarket_smart_money_radar",
+      "description": "Return all-market Polymarket smart-money movements for profitable wallet cohorts. Data and analytics only; no trading, custody, or investment advice.",
+      "endpoint": "POST /polymarket-smart-money-radar",
+      "billable_event": "valid_polymarket_smart_money_report_generated",
+      "launch_priority": "batch_listing_candidate"
+    },
+    {
+      "name": "event_probability_crypto_divergence",
+      "description": "Compare prediction-market event probability changes with crypto spot and funding moves to surface divergence signals for research agents.",
+      "endpoint": "POST /event-probability-crypto-divergence",
+      "billable_event": "valid_event_crypto_divergence_report_generated",
+      "launch_priority": "batch_listing_candidate"
+    },
+    {
+      "name": "crypto_market_pulse_report",
+      "description": "Return a compact crypto market pulse with flows, anomalies, and watch items for agent research workflows.",
+      "endpoint": "POST /crypto-market-pulse-report",
+      "billable_event": "valid_crypto_market_pulse_report_generated",
+      "launch_priority": "batch_listing_candidate"
+    },
+    {
       "name": "audit_agent_delivery",
       "description": "Given a task, agent writeback, artifact paths, changed files, validation output, hard gates, and next gate, return pass/needs_review/fail with missing evidence, risks, buyer summary, evaluator notes, and machine flags.",
       "endpoint": "POST /audit-agent-deliverable",
@@ -63,6 +91,9 @@
   "discovery_tags": [
     "agent marketplace",
     "agent transaction gate",
+    "World Cup smart money",
+    "prediction market analytics",
+    "Polymarket analytics",
     "budget guard",
     "pre-hire gate",
     "delivery acceptance",

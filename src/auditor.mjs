@@ -86,6 +86,7 @@ export function auditDelivery(input) {
 
   return {
     schema_version: SCHEMA_VERSION,
+    service_id: 'agent_delivery_acceptance_audit',
     verdict,
     score,
     dimension_scores,
@@ -95,8 +96,16 @@ export function auditDelivery(input) {
     questions_for_seller: unique(questions),
     next_gate: normalizeNextGate(input, verdict, flags),
     buyer_summary: buildBuyerSummary(input, verdict, flags, missing, risks),
+    buyer_summary_zh: buildBuyerSummaryZh(input, verdict, flags, missing, risks),
     evaluator_notes: buildEvaluatorNotes(verdict, flags, criticalBreaches),
-    machine_flags: Array.from(flags).sort()
+    machine_flags: Array.from(flags).sort(),
+    value_loop: {
+      why_pay_again: 'Each delivery is a new artifact set; re-run on every submit before accept/pay.',
+      stale_after_minutes: null,
+      best_used_in: 'buyer_acceptance_gate_per_task',
+      paid_value_tier: 'A_repeat_workflow',
+      fulfillment: 'edge_on_demand_no_llm'
+    }
   };
 }
 
@@ -334,6 +343,20 @@ function buildBuyerSummary(input, verdict, flags, missing, risks) {
     return `${task}: do not accept yet. ${risks[0] ?? 'A critical delivery or hard-gate issue is unresolved.'}`;
   }
   return `${task}: useful delivery, but needs review before acceptance. Main gap: ${missing[0] ?? risks[0] ?? 'owner decision required'}.`;
+}
+
+function buildBuyerSummaryZh(input, verdict, flags, missing, risks) {
+  const task = input.task.task_id ?? '本次交付';
+  if (verdict === 'pass') {
+    if (flags.has('guard_triggered')) {
+      return `${task}：可接受（安全停机）。任务因护栏正确触发而停止，不算乱交付。`;
+    }
+    return `${task}：在声明范围内可接受。剩余备注不是验收阻塞项。`;
+  }
+  if (verdict === 'fail') {
+    return `${task}：暂勿验收。${risks[0] ?? '存在未解的关键交付或硬闸问题。'}`;
+  }
+  return `${task}：有用但需复核后再验收。主要缺口：${missing[0] ?? risks[0] ?? '需买方决策'}。`;
 }
 
 function buildEvaluatorNotes(verdict, flags, criticalBreaches) {
