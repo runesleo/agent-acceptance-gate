@@ -13,6 +13,8 @@
 //          -> { code: '0', data: [{ instId, last: '63215.9', open24h: '62593.7', ... }] }
 //          (24h spot change derived as (last - open24h) / open24h)
 
+import { classifyAssetStance } from './market-stance.mjs';
+
 const SERVICE_ID = 'event_price_divergence_radar';
 const GAMMA_BASE = 'https://gamma-api.polymarket.com';
 const OKX_BASE = 'https://www.okx.com';
@@ -207,19 +209,10 @@ function evaluateDivergence(asset, instId, market, priceChangePct) {
   };
 }
 
-/**
- * +1 when the first outcome rising is bullish for the asset,
- * -1 when bearish, 0 when the market cannot be interpreted safely.
- */
+/** Shared classifier (src/market-stance.mjs) — see that file for the 2026-07-30
+ * measurement that removed the dollar-amount bullish fallback. */
 function classifyStance(market) {
-  const outcome = market.primary_outcome.toLowerCase();
-  if (outcome === 'up') return 1;
-  if (outcome === 'down') return -1;
-  if (outcome !== 'yes') return 0;
-  const question = market.title.toLowerCase();
-  if (/\b(dip|below|drop|fall|crash|under|down)\b/.test(question)) return -1;
-  if (/\b(reach|above|hit|up|exceed|all[- ]time high|ath)\b/.test(question) || /\$\s?\d/.test(question)) return 1;
-  return 0;
+  return classifyAssetStance(market);
 }
 
 function scoreConfidence(probChange, priceChangePct, volume24hr) {

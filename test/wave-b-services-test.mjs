@@ -2074,3 +2074,39 @@ try {
 }
 
 console.log('PASS wave-b-services-test');
+
+// ---- unit: shared asset stance classifier -----------------------------------
+// 2026-07-30: extracted from two drifted copies. The old rule ended with
+// `|| /\$\s?\d/ → +1`, so 66 of 362 live Gamma markets fell through and were all
+// called bullish while only ~6 deserved it. Range buckets must be skipped, not signed.
+{
+  const { classifyAssetStance } = await import('../src/market-stance.mjs');
+  const yes = (title) => classifyAssetStance({ primary_outcome: 'Yes', title });
+
+  // explicit outcomes still short-circuit
+  assert.equal(classifyAssetStance({ primary_outcome: 'Up', title: 'anything' }), 1);
+  assert.equal(classifyAssetStance({ primary_outcome: 'Down', title: 'anything' }), -1);
+  assert.equal(classifyAssetStance({ primary_outcome: 'Chiefs', title: 'anything' }), 0);
+
+  // the three shapes that were all scored +1 before
+  assert.equal(yes('Will the price of Ethereum be less than $1,400 on July 30?'), -1);
+  assert.equal(yes('Will the price of Ethereum be between $1,400 and $1,500 on July 30?'), 0);
+  assert.equal(yes('Will the price of Ethereum be greater than $2,300 on July 30?'), 1);
+
+  // range bucket variants must all skip
+  assert.equal(yes('Will Solana settle $30 to $40 on August 1?'), 0);
+  assert.equal(yes('Will BTC close $60,000–$62,000 today?'), 0);
+
+  // bearish phrasings the old keyword list missed
+  assert.equal(yes('Will Solana be worth less than $100 in 2026?'), -1);
+  assert.equal(yes('Will BTC trade sub-$50,000 this month?'), -1);
+  assert.equal(yes('Will ETH be lower than $2,000 on Friday?'), -1);
+
+  // keyword polarity preserved
+  assert.equal(yes('Will Bitcoin dip to $60,000 in July?'), -1);
+  assert.equal(yes('Will Bitcoin reach an all-time high in 2026?'), 1);
+
+  // fail closed: a bare dollar figure is no longer read as bullish
+  assert.equal(yes('Will Bitcoin be $60,000 on July 30?'), 0);
+  assert.equal(yes('Some unparseable question about ETH'), 0);
+}

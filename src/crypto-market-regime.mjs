@@ -18,6 +18,8 @@
 //             outcomePrices, oneDayPriceChange, volume24hr, active, closed }] }] }
 //          (oneDayPriceChange missing on quiet markets — those are skipped, never estimated)
 
+import { classifyAssetStance } from './market-stance.mjs';
+
 const SERVICE_ID = 'crypto_market_regime_radar';
 const OKX_BASE = 'https://www.okx.com';
 const GAMMA_BASE = 'https://gamma-api.polymarket.com';
@@ -264,20 +266,10 @@ function computePmSentiment(markets) {
   };
 }
 
-/**
- * +1 when the first outcome rising is bullish for the asset,
- * -1 when bearish, 0 when the market cannot be interpreted safely.
- * (Same rule set as the Event Price Divergence Radar.)
- */
+/** Shared classifier (src/market-stance.mjs) — see that file for the 2026-07-30
+ * measurement that removed the dollar-amount bullish fallback. */
 function classifyStance(market) {
-  const outcome = market.primary_outcome.toLowerCase();
-  if (outcome === 'up') return 1;
-  if (outcome === 'down') return -1;
-  if (outcome !== 'yes') return 0;
-  const question = market.title.toLowerCase();
-  if (/\b(dip|below|drop|fall|crash|under|down)\b/.test(question)) return -1;
-  if (/\b(reach|above|hit|up|exceed|all[- ]time high|ath)\b/.test(question) || /\$\s?\d/.test(question)) return 1;
-  return 0;
+  return classifyAssetStance(market);
 }
 
 // ---- dimensions ---------------------------------------------------------------
