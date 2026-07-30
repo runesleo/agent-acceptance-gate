@@ -35,6 +35,20 @@ export function assessAgentBudgetPreflight(input = {}) {
   if (!offer) {
     throw new Error('offer is required ({ provider, price_usdt, ... })');
   }
+  // 2026-07-30: remaining = cap - spent - held, and nothing checked the sign of the
+  // caller-supplied ledger. budget_cap_usdt=1 with spent_usdt=-100 reported
+  // remaining=101 and returned action=buy for a 50 USDT offer — a spend gate
+  // approving 50x its own cap. Negative ledger values are always a caller bug or an
+  // attempt to widen the cap; refuse them instead of arithmetically absorbing them.
+  if (spent === null || spent < 0) {
+    throw new Error('spent_usdt must be zero or positive');
+  }
+  if (held === null || held < 0) {
+    throw new Error('held_usdt must be zero or positive');
+  }
+  if (maxPerCall === null || maxPerCall <= 0) {
+    throw new Error('max_per_call_usdt must be a positive number when provided');
+  }
 
   const remaining = round4(Math.max(0, budgetCap - spent - held));
   const checks = [];

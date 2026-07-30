@@ -2182,3 +2182,108 @@ console.log('PASS wave-b-services-test');
   assert.equal(out.requested_scope, undefined);
   assert.ok(!/无活跃市场/.test(out.buyer_summary_zh));
 }
+
+// ---- unit: agent-budget-preflight (spend gate) -------------------------------
+// 2026-07-30: this service is the gate an agent calls BEFORE paying, and it had no
+// test coverage at all. Adding it surfaced a live defect: remaining = cap - spent -
+// held never checked the sign of the caller-supplied ledger, so budget_cap_usdt=1
+// with spent_usdt=-100 reported remaining=101 and returned action=buy for a 50 USDT
+// offer — approving 50x its own cap.
+{
+  const { assessAgentBudgetPreflight, buildAgentBudgetPreflightFallback } =
+    await import('../src/agent-budget-preflight.mjs');
+  const offer = { provider: 'okx-asp', price_usdt: 1 };
+
+  // --- the defect: a negative ledger must never widen the cap
+  assert.throws(
+    () => assessAgentBudgetPreflight({
+      budget_cap_usdt: 1, spent_usdt: -100, max_per_call_usdt: 60,
+      offer: { provider: 'okx-asp', price_usdt: 50 }
+    }),
+    /spent_usdt must be zero or positive/
+  );
+  assert.throws(
+    () => assessAgentBudgetPreflight({ budget_cap_usdt: 1, held_usdt: -99, offer }),
+    /held_usdt must be zero or positive/
+  );
+  assert.throws(
+    () => assessAgentBudgetPreflight({ budget_cap_usdt: 10, max_per_call_usdt: 0, offer }),
+    /max_per_call_usdt must be a positive number/
+  );
+
+  // --- happy path
+  const buy = assessAgentBudgetPreflight({ budget_cap_usdt: 10, spent_usdt: 2, offer });
+  assert.equal(buy.action, 'buy');
+  assert.equal(buy.reason, 'within_policy_and_budget');
+  assert.equal(buy.amount_usdt, 1);
+  assert.equal(buy.remaining_usdt, 8);
+
+  // held funds reduce what is spendable
+  const withHold = assessAgentBudgetPreflight({
+    budget_cap_usdt: 10, spent_usdt: 2, held_usdt: 7, offer
+  });
+  assert.equal(withHold.remaining_usdt, 1);
+  assert.equal(withHold.action, 'buy');
+
+  // price exactly equal to remaining is still affordable (epsilon, not strict >)
+  const exact = assessAgentBudgetPreflight({ budget_cap_usdt: 10, spent_usdt: 9, offer });
+  assert.equal(exact.action, 'buy');
+
+  // --- rejections, and their precedence
+  const overTotal = assessAgentBudgetPreflight({
+    budget_cap_usdt: 10, spent_usdt: 9.5, max_per_call_usdt: 5, offer
+  });
+  assert.equal(overTotal.action, 'reject_budget');
+  assert.equal(overTotal.reason, 'total_cap_exceeded');
+
+  const overPerCall = assessAgentBudgetPreflight({
+    budget_cap_usdt: 100, max_per_call_usdt: 0.5, offer
+  });
+  assert.equal(overPerCall.action, 'reject_budget');
+  assert.equal(overPerCall.reason, 'per_call_cap_exceeded');
+
+  // allowlist is checked before any budget maths — an affordable call from an
+  // unlisted provider must still be refused on policy, not waved through
+  const notAllowed = assessAgentBudgetPreflight({
+    budget_cap_usdt: 100, allowlisted_providers: ['trusted-asp'], offer
+  });
+  assert.equal(notAllowed.action, 'reject_policy');
+  assert.equal(notAllowed.reason, 'provider_not_allowed');
+  assert.equal(notAllowed.amount_usdt, 0);
+
+  // allowlist matching is case-insensitive on the offer side
+  const allowed = assessAgentBudgetPreflight({
+    budget_cap_usdt: 100, allowlisted_providers: ['okx-asp'],
+    offer: { provider: 'OKX-ASP', price_usdt: 1 }
+  });
+  assert.equal(allowed.action, 'buy');
+
+  // --- evidence gate: do not pay for what you already know
+  const skip = assessAgentBudgetPreflight({
+    budget_cap_usdt: 10, evidence_sufficient: true, offer
+  });
+  assert.equal(skip.action, 'skip_sufficient');
+  assert.equal(skip.reason, 'evidence_already_sufficient');
+  assert.equal(skip.amount_usdt, 0);
+
+  // --- input validation
+  assert.throws(() => assessAgentBudgetPreflight({ offer }), /budget_cap_usdt is required/);
+  assert.throws(() => assessAgentBudgetPreflight({ budget_cap_usdt: 0, offer }), /budget_cap_usdt is required/);
+  assert.throws(() => assessAgentBudgetPreflight({ budget_cap_usdt: 10 }), /offer is required/);
+  // a malformed price must not fall through to a buy
+  assert.throws(
+    () => assessAgentBudgetPreflight({ budget_cap_usdt: 10, offer: { provider: 'x', price_usdt: 'abc' } }),
+    /offer is required/
+  );
+  assert.throws(
+    () => assessAgentBudgetPreflight({ budget_cap_usdt: 10, offer: { provider: '', price_usdt: 1 } }),
+    /offer is required/
+  );
+
+  // --- the gate never settles, whatever it decides
+  for (const r of [buy, skip, notAllowed, overTotal]) {
+    assert.equal(r.service_id, 'agent_budget_preflight');
+    assert.ok(r.caveats.some((c) => /Does not hold funds, sign, settle/.test(c)));
+  }
+  assert.equal(buildAgentBudgetPreflightFallback().action, 'reject_policy');
+}
