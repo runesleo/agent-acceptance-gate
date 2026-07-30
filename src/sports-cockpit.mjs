@@ -51,12 +51,33 @@ export async function assessSportsCockpitLive(input = {}, options = {}) {
     ? 'upset_watch'
     : (signals.length ? 'follow_smart_money_review' : 'no_signal');
 
+  // 2026-07-30: a degraded leg was only ever admitted in prose inside `caveats`, while
+  // the response still declared mode: 'live'. And once the smart-money leg learned to
+  // report off_scope_fallback (see worldcup-smart-money-live), the cockpit swallowed
+  // that too — a scoped request could come back carrying site-wide signals with nothing
+  // machine-readable to branch on. Both now surface at the top level.
+  const degraded = [
+    ...(smartResult.status === 'rejected' ? ['smart_money'] : []),
+    ...(upsetResult.status === 'rejected' ? ['upset'] : [])
+  ];
+  const capability_status = degraded.length
+    ? `degraded_${degraded.join('_and_')}_leg`
+    : (smart.capability_status === 'off_scope_fallback' ? 'off_scope_fallback' : 'on_scope');
+
   return {
     schema_version: '0.1',
     service_id: SERVICE_ID,
     mode: 'live',
     generated_at: new Date().toISOString(),
     input: scope,
+    capability_status,
+    degraded_legs: degraded,
+    ...(smart.capability_status === 'off_scope_fallback'
+      ? {
+        requested_scope: smart.requested_scope ?? null,
+        effective_scope: smart.effective_scope ?? null
+      }
+      : {}),
     action,
     buyer_summary_zh: buildBuyerSummaryZh(action, scope, signals, alerts, cohort),
     value_loop: {

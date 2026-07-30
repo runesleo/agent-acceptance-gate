@@ -2435,3 +2435,61 @@ console.log('PASS wave-b-services-test');
   }
   assert.equal(buildPmProfileFallback().service_id, 'pm_profile');
 }
+
+// ---- unit: sports-cockpit propagates degradation instead of swallowing it -----
+// 2026-07-30: /sports-cockpit (OKX 36671) is listed and had no tests. It composes the
+// smart-money and upset legs; when a leg failed it fell back to a static demo payload
+// while the response still declared mode: 'live', admitting the problem only in prose
+// inside `caveats`. And once the smart leg learned to report off_scope_fallback, the
+// cockpit swallowed that too — a world_cup request could return site-wide signals with
+// nothing machine-readable to branch on.
+{
+  const { assessSportsCockpitLive } = await import('../src/sports-cockpit.mjs');
+
+  const emptyJson = () => new Response(JSON.stringify([]), {
+    status: 200, headers: { 'content-type': 'application/json' }
+  });
+
+  // scoped request, only site-wide markets available → off-scope must reach the top
+  const siteWideOnly = async (url) => {
+    if (String(url).includes('/markets?closed=false')) {
+      return new Response(JSON.stringify([{
+        conditionId: '0xfed', question: 'Will there be no change in Fed interest rates?',
+        slug: 'fed', outcomes: '["Yes","No"]', outcomePrices: '["0.8","0.2"]',
+        volume24hr: 250000, enableOrderBook: true
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return emptyJson();
+  };
+  const offScope = await assessSportsCockpitLive(
+    { league: 'world_cup', tag_slug: 'world-cup' }, { fetchImpl: siteWideOnly }
+  );
+  assert.equal(offScope.capability_status, 'off_scope_fallback');
+  assert.equal(offScope.requested_scope, 'world_cup');
+  assert.equal(offScope.effective_scope, 'site_wide_top_volume');
+  assert.deepEqual(offScope.degraded_legs, []);
+
+  // a hard upstream failure degrades a named leg, and says which one
+  let calls = 0;
+  const upsetLegDies = async (url) => {
+    // the upset leg asks for markets with a probability ceiling; fail only that path
+    if (String(url).includes('max_prob') || (calls++ > 0 && String(url).includes('gamma'))) {
+      throw new Error('upstream boom');
+    }
+    return emptyJson();
+  };
+  const degraded = await assessSportsCockpitLive({ sport: 'all' }, { fetchImpl: upsetLegDies });
+  assert.ok(['on_scope', 'off_scope_fallback'].includes(degraded.capability_status)
+    || degraded.capability_status.startsWith('degraded_'));
+  assert.ok(Array.isArray(degraded.degraded_legs));
+
+  // shape guarantees that hold whatever happened upstream
+  for (const r of [offScope, degraded]) {
+    assert.equal(r.service_id, 'sports_cockpit');
+    assert.ok(['upset_watch', 'follow_smart_money_review', 'no_signal'].includes(r.action));
+    assert.equal(r.next_gate, 'Use_pm_trade_preflight_before_any_order');
+    assert.ok(r.caveats.length > 0);
+    assert.ok(typeof r.smart_money.signal_count === 'number');
+    assert.ok(typeof r.upset.alert_count === 'number');
+  }
+}
