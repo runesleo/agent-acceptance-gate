@@ -168,12 +168,28 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * 2026-07-30: the leaderboard amount was interpolated raw, so a real call returned
+ * "7日榜 PnL +0.00006835934340188032 USDT" — twenty significant digits of float noise
+ * in the line a buyer actually reads. Round for display only; profile.pnl_7d_usdt
+ * keeps the untouched upstream value for machine consumers.
+ */
+function formatUsdtForDisplay(value) {
+  if (value == null || !Number.isFinite(value)) return null;
+  if (value === 0) return '0';
+  // Sub-cent amounts are real but not meaningful at 2dp — say so rather than print 0.00
+  if (Math.abs(value) < 0.01) return `${value > 0 ? '<+' : '>-'}0.01`;
+  return (Math.round(value * 100) / 100).toFixed(2);
+}
+
 function buildBuyerSummaryZh({ displayName, address, pnl7dAmt, openCount, approxPnl }) {
   const who = displayName || shorten(address);
-  const pnlBit = pnl7dAmt == null
+  const shown = formatUsdtForDisplay(pnl7dAmt);
+  const pnlBit = shown == null
     ? '7日榜无记录'
-    : `7日榜 PnL ${pnl7dAmt >= 0 ? '+' : ''}${pnl7dAmt} USDT`;
-  return `${who}：${pnlBit}；抽样持仓 ${openCount} 个，持仓现金盈亏约 ${approxPnl} USDT。只读画像，非下单建议。`;
+    : `7日榜 PnL ${pnl7dAmt >= 0 && !shown.startsWith('<') && !shown.startsWith('>') ? '+' : ''}${shown} USDT`;
+  const posBit = formatUsdtForDisplay(approxPnl) ?? '0';
+  return `${who}：${pnlBit}；抽样持仓 ${openCount} 个，持仓现金盈亏约 ${posBit} USDT。只读画像，非下单建议。`;
 }
 
 function shorten(address) {

@@ -2371,3 +2371,67 @@ console.log('PASS wave-b-services-test');
   assert.equal(g({ title: 'Who wins the coin toss?' }), 'other');
   assert.equal(g({}), 'other');
 }
+
+// ---- unit: pm-profile (module had no tests) ----------------------------------
+// 2026-07-30: /pm-profile (OKX 36663) is listed and had no coverage. A live call
+// returned "7日榜 PnL +0.00006835934340188032 USDT" — twenty digits of float noise
+// in the line the buyer reads. Display is now rounded; the machine field is not.
+{
+  const { assessPmProfileLive, buildPmProfileFallback } =
+    await import('../src/pm-profile.mjs');
+  const ADDR = '0x63ce342161250d705dc0b16df89036c8e5f9ba9a';
+
+  const mock = (pnlRows, positions = []) => async (url) => {
+    const u = String(url);
+    if (u.includes('lb-api') && u.includes('/profit')) {
+      return new Response(JSON.stringify(pnlRows), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('data-api') && u.includes('/positions')) {
+      return new Response(JSON.stringify(positions), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${u}`);
+  };
+
+  // dust PnL is disclosed as sub-cent, never printed raw and never rounded to 0.00
+  const dust = await assessPmProfileLive(
+    { address: ADDR },
+    { fetchImpl: mock([{ proxyWallet: ADDR, amount: 0.00006835934340188032, name: '0x8dxd' }]) }
+  );
+  assert.ok(dust.buyer_summary_zh.includes('<+0.01'));
+  assert.ok(!dust.buyer_summary_zh.includes('0.00006835'));
+  // machine consumers still get the exact upstream number
+  assert.equal(dust.profile.pnl_7d_usdt, 0.00006835934340188032);
+
+  // ordinary amounts render at 2dp with a sign
+  const normal = await assessPmProfileLive(
+    { address: ADDR },
+    { fetchImpl: mock([{ proxyWallet: ADDR, amount: 1234.5678, name: 'Trader' }]) }
+  );
+  assert.ok(normal.buyer_summary_zh.includes('+1234.57'));
+  const negative = await assessPmProfileLive(
+    { address: ADDR },
+    { fetchImpl: mock([{ proxyWallet: ADDR, amount: -88.129, name: 'Trader' }]) }
+  );
+  assert.ok(negative.buyer_summary_zh.includes('-88.13'));
+
+  // absent from the leaderboard is stated, not silently shown as zero
+  const missing = await assessPmProfileLive({ address: ADDR }, { fetchImpl: mock([]) });
+  assert.ok(missing.buyer_summary_zh.includes('7日榜无记录'));
+  assert.equal(missing.profile.pnl_7d_usdt, null);
+  assert.ok(missing.confidence_gaps.includes('not_on_7d_leaderboard'));
+
+  // an unresolvable input must throw rather than profile the wrong wallet
+  await assert.rejects(
+    () => assessPmProfileLive({ username: 'definitely-not-on-the-board' }, { fetchImpl: mock([]) }),
+    /Could not resolve wallet/
+  );
+  await assert.rejects(() => assessPmProfileLive({}, { fetchImpl: mock([]) }), /is required/);
+
+  // every response carries the read-only rail
+  for (const r of [dust, normal, missing]) {
+    assert.equal(r.service_id, 'pm_profile');
+    assert.ok(r.caveats.some((c) => /No wallet custody, no trade execution/.test(c)));
+    assert.ok(r.confidence_gaps.includes('not_fee_inclusive_audit_pnl'));
+  }
+  assert.equal(buildPmProfileFallback().service_id, 'pm_profile');
+}
