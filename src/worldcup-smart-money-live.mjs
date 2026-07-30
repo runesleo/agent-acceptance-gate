@@ -262,6 +262,14 @@ function buildLiveResponse({ serviceId, inputEcho, fallbackCaveat, scan, extraSo
     mode: 'live',
     generated_at: new Date().toISOString(),
     input: inputEcho,
+    // Machine-readable scope verdict so a calling agent can branch without parsing prose.
+    capability_status: extraSource?.scope_expanded ? 'off_scope_fallback' : 'on_scope',
+    ...(extraSource?.scope_expanded
+      ? {
+        requested_scope: extraSource.requested_scope,
+        effective_scope: extraSource.effective_scope
+      }
+      : {}),
     buyer_summary_zh: buildSmartMoneyBuyerSummaryZh(summary, extraSource),
     buyer_summary_en: buildSmartMoneyBuyerSummaryEn(summary, extraSource),
     summary,
@@ -424,7 +432,24 @@ export async function resolveSportsMarkets(fetchImpl, scopeInput) {
     .filter((market) => market.conditionId && market.enableOrderBook !== false)
     .map((market) => normalizeMarket(market, market.question ?? market.slug ?? ''));
   discovery.method = 'top_volume_fallback';
+  // 2026-07-30: this branch used to return site-wide top-volume markets without
+  // marking the scope change, so buildSmartMoneyBuyerSummaryZh/En took the on-scope
+  // wording. Measured after the 2026-07-19 World Cup final, /world-cup-smart-money-radar
+  // answered with "Top signal: … Will there be no change in Fed interest rates after the
+  // September 2026 meeting?" while the headline still read 已扫描真实 Polymarket 市场 —
+  // a macro market delivered under a World Cup SKU. The caveat existed but only inside
+  // `caveats`; buyers and calling agents read the summary and the status field.
+  markScopeFellBackSiteWide(discovery, scope);
   return { markets: fallbackMarkets, usedFallback: true, discovery };
+}
+
+/** Scoped request answered with site-wide markets — must be visible, not buried. */
+function markScopeFellBackSiteWide(discovery, scope) {
+  const requested = scope?.league ?? scope?.sport ?? scope?.tag_slug ?? scope?.label ?? null;
+  if (!requested || requested === 'all') return;
+  discovery.scope_expanded = true;
+  discovery.requested_scope = requested;
+  discovery.effective_scope = 'site_wide_top_volume';
 }
 
 function maybeMarkScopeExpansion(discovery, scope, selectedToken) {

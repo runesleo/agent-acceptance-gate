@@ -2110,3 +2110,75 @@ console.log('PASS wave-b-services-test');
   assert.equal(yes('Will Bitcoin be $60,000 on July 30?'), 0);
   assert.equal(yes('Some unparseable question about ETH'), 0);
 }
+
+// ---- unit: scoped smart-money must never deliver off-scope silently -----------
+// 2026-07-30: after the 2026-07-19 World Cup final, /world-cup-smart-money-radar
+// answered with a Fed-rates market while the headline still read 已扫描真实 Polymarket
+// 市场 — the top_volume_fallback branch never marked the scope change, so the summary
+// took the on-scope wording. The caveat existed but only inside `caveats`.
+{
+  const { assessSportsSmartMoneyLive } = await import('../src/worldcup-smart-money-live.mjs');
+  // Every scoped discovery attempt misses; only the site-wide top-volume list answers.
+  const siteWideOnly = async (url) => {
+    const u = String(url);
+    if (u.includes('/markets?closed=false')) {
+      return new Response(JSON.stringify([{
+        conditionId: '0xfed',
+        question: 'Will there be no change in Fed interest rates?',
+        slug: 'fed-no-change',
+        outcomes: '["Yes","No"]',
+        outcomePrices: '["0.8","0.2"]',
+        volume24hr: 250000,
+        enableOrderBook: true
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    // tag_slug / public-search / trades / leaderboard lookups all come back empty
+    return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  const out = await assessSportsSmartMoneyLive(
+    { league: 'world_cup', tag_slug: 'world-cup' },
+    { fetchImpl: siteWideOnly, legacyWorldCup: true, serviceId: 'world_cup_smart_money_radar' }
+  );
+
+  assert.equal(out.capability_status, 'off_scope_fallback');
+  assert.equal(out.requested_scope, 'world_cup');
+  assert.equal(out.effective_scope, 'site_wide_top_volume');
+  // the headline itself must carry the scope change, not just the caveats array
+  assert.ok(out.buyer_summary_zh.includes('world_cup'));
+  assert.ok(/无活跃市场/.test(out.buyer_summary_zh));
+  assert.ok(/expanded/i.test(out.buyer_summary_en));
+  assert.ok(out.caveats.some((c) => /No active/i.test(c)));
+}
+
+// on-scope requests must stay clean: no scope fields, no warning wording
+{
+  const { assessSportsSmartMoneyLive } = await import('../src/worldcup-smart-money-live.mjs');
+  const onScope = async (url) => {
+    const u = String(url);
+    if (u.includes('tag_slug=world-cup')) {
+      return new Response(JSON.stringify([{
+        closed: false,
+        markets: [{
+          conditionId: '0xwc',
+          question: 'Will Brazil win the World Cup?',
+          slug: 'brazil-wc',
+          outcomes: '["Yes","No"]',
+          outcomePrices: '["0.3","0.7"]',
+          volume24hr: 90000,
+          active: true,
+          closed: false,
+          enableOrderBook: true
+        }]
+      }]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const out = await assessSportsSmartMoneyLive(
+    { league: 'world_cup', tag_slug: 'world-cup' },
+    { fetchImpl: onScope, legacyWorldCup: true, serviceId: 'world_cup_smart_money_radar' }
+  );
+  assert.equal(out.capability_status, 'on_scope');
+  assert.equal(out.requested_scope, undefined);
+  assert.ok(!/无活跃市场/.test(out.buyer_summary_zh));
+}
