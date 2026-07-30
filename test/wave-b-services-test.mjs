@@ -784,7 +784,41 @@ const BASE = 'https://gate.example.com';
   assert.equal(brier.wins, 1);
   // mean((0.7-1)^2 + (0.2-0)^2) = (0.09 + 0.04)/2 = 0.065
   assert.equal(brier.brier, 0.065);
-  assert.equal(brier.rating, 'good');
+  // 2026-07-30: a 2-market sample is below the rateable threshold, so the service
+  // must withhold a verdict instead of calling it "good" (previous behaviour).
+  assert.equal(brier.rating, 'not_rateable');
+  assert.equal(brier.sample_bias, 'sample_below_rateable_threshold');
+  // base rate 0.5 → predicting it every time scores 0.5*0.5 = 0.25
+  assert.equal(brier.baseline_brier, 0.25);
+  assert.equal(brier.skill_vs_baseline, 0.185);
+  assert.ok(brier.confidence_gaps.includes('redeemed_winners_absent_from_positions_page'));
+}
+
+// pm-brier: zero-win sample is the survivorship-bias signature — never rate it.
+{
+  const { assessPmBrierLive } = await import('../src/pm-brier.mjs');
+  const allLosses = async (url) => {
+    if (String(url).includes('data-api.polymarket.com/positions')) {
+      return new Response(JSON.stringify([
+        { title: 'L1', redeemable: true, avgPrice: 0.33, currentValue: 0 },
+        { title: 'L2', redeemable: true, avgPrice: 0.29, currentValue: 0 },
+        { title: 'L3', redeemable: true, avgPrice: 0.4, currentValue: 0 }
+      ]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected ${url}`);
+  };
+  const out = await assessPmBrierLive(
+    { address: '0x63ce342161250d705dc0b16df89036c8e5f9ba9a' },
+    { fetchImpl: allLosses }
+  );
+  assert.equal(out.wins, 0);
+  assert.equal(out.win_rate, 0);
+  assert.equal(out.sample_bias, 'zero_wins_survivorship_suspected');
+  assert.equal(out.rating, 'not_rateable');
+  // cheap losing longshots still produce a low raw Brier — that must not read as skill
+  assert.ok(out.brier < 0.15);
+  assert.ok(out.skill_vs_baseline < 0);
+  assert.ok(out.buyer_summary_zh.includes('不给评级'));
 }
 
 // ---- unit: sports upset max_prob + smart-money cohort -----------------------
