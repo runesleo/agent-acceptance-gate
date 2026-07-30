@@ -2287,3 +2287,35 @@ console.log('PASS wave-b-services-test');
   }
   assert.equal(buildAgentBudgetPreflightFallback().action, 'reject_policy');
 }
+
+// ---- unit: football residual thresholds are disclosed, not hidden -------------
+// 2026-07-30: the cross-market residual cutoffs were inline magic numbers. They are
+// not wrong — labelling a market "draw heavy" needs a cutoff — but a buyer paying per
+// call could not see why 0.35 rather than 0.4, nor tell a tuned value from a typo.
+// crypto-market-regime already declares its weights so they can be audited; same
+// treatment here. Values unchanged: this is disclosure, not a retune.
+{
+  const { enrichFootballCategory, CROSS_MARKET_RESIDUAL_THRESHOLDS } =
+    await import('../src/pm-category-football.mjs');
+
+  // the ruleset is importable and frozen
+  assert.equal(CROSS_MARKET_RESIDUAL_THRESHOLDS.ml_side_short, 0.35);
+  assert.equal(CROSS_MARKET_RESIDUAL_THRESHOLDS.ml_draw_elevated, 0.3);
+  assert.equal(CROSS_MARKET_RESIDUAL_THRESHOLDS.over25_rich, 0.62);
+  assert.equal(CROSS_MARKET_RESIDUAL_THRESHOLDS.ml_max_side_tight, 0.4);
+  assert.equal(CROSS_MARKET_RESIDUAL_THRESHOLDS.btts_rich, 0.6);
+  assert.equal(CROSS_MARKET_RESIDUAL_THRESHOLDS.over25_subdued, 0.45);
+  assert.ok(Object.isFrozen(CROSS_MARKET_RESIDUAL_THRESHOLDS));
+
+  // and it ships with every verdict, even an empty one
+  const empty = enrichFootballCategory({
+    market: {}, eventBundle: null, eventMatrix: [], fixture: null
+  });
+  assert.deepEqual(
+    empty.coherence.residual_thresholds,
+    { ...CROSS_MARKET_RESIDUAL_THRESHOLDS }
+  );
+  // callers must not be able to mutate the shared ruleset through the response
+  empty.coherence.residual_thresholds.ml_side_short = 0.99;
+  assert.equal(CROSS_MARKET_RESIDUAL_THRESHOLDS.ml_side_short, 0.35);
+}
