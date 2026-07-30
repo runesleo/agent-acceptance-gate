@@ -2319,3 +2319,55 @@ console.log('PASS wave-b-services-test');
   empty.coherence.residual_thresholds.ml_side_short = 0.99;
   assert.equal(CROSS_MARKET_RESIDUAL_THRESHOLDS.ml_side_short, 0.35);
 }
+
+// ---- unit: tennis price gate + group classifier (module had no tests) ---------
+// 2026-07-30: /tennis-match-card is a listed service (OKX 36679) that carried the
+// most cutoffs in the repo and zero test coverage. The price gate is the rail that
+// decides whether an expression may be handed over as the tip at all, so its
+// boundaries are pinned here before anything else in the file changes.
+{
+  const { scorePriceStatus, TENNIS_PRICE_GATE, classifyTennisGroup } =
+    await import('../src/pm-category-tennis.mjs');
+
+  assert.ok(Object.isFrozen(TENNIS_PRICE_GATE));
+  assert.equal(TENNIS_PRICE_GATE.full, 0.85);
+  assert.equal(TENNIS_PRICE_GATE.rich, 0.72);
+
+  // boundaries are inclusive on the refusing side — 0.85 is already "full"
+  assert.equal(scorePriceStatus(0.85), 'full');
+  assert.equal(scorePriceStatus(0.84), 'rich');
+  assert.equal(scorePriceStatus(0.72), 'rich');
+  assert.equal(scorePriceStatus(0.71), 'watch');
+  // and the gate is symmetric: a 0.15 yes is just as fully priced as a 0.85 yes
+  assert.equal(scorePriceStatus(0.15), 'full');
+  assert.equal(scorePriceStatus(0.16), 'rich');
+  assert.equal(scorePriceStatus(0.28), 'rich');
+  assert.equal(scorePriceStatus(0.29), 'watch');
+  // the acceptable band
+  assert.equal(scorePriceStatus(0.4), 'acceptable');
+  assert.equal(scorePriceStatus(0.5), 'acceptable');
+  assert.equal(scorePriceStatus(0.6), 'acceptable');
+  assert.equal(scorePriceStatus(0.61), 'watch');
+  // missing or malformed prices must never look tradable
+  for (const bad of [null, undefined, NaN, Infinity, 'abc']) {
+    assert.equal(scorePriceStatus(bad), 'unknown');
+  }
+
+  // classifyTennisGroup ordering — the file itself warns about substring traps
+  // ("check set_games / first_set before bare set_totals"), so pin the traps.
+  const g = (row) => classifyTennisGroup(row);
+  assert.equal(g({ sports_market_type: 'tennis_moneyline' }), 'match_moneyline');
+  assert.equal(g({ title: 'Set 1 winner' }), 'set1_winner');
+  assert.equal(g({ title: 'Set 1 games O/U 9.5' }), 'set1_games');
+  assert.equal(g({ title: 'Set 2 games O/U 9.5' }), 'set_games');
+  assert.equal(g({ title: 'Set 3 winner' }), 'set_winner');
+  assert.equal(g({ title: 'Total sets O/U 2.5' }), 'total_sets');
+  assert.equal(g({ sports_market_type: 'tennis_set_handicap' }), 'set_handicap');
+  assert.equal(g({ title: 'Completed match' }), 'completed_match');
+  assert.equal(g({ title: 'Match O/U 22.5 games' }), 'match_games_totals');
+  // a moneyline whose text mentions a set must NOT be read as the match moneyline
+  assert.notEqual(g({ sports_market_type: 'moneyline', title: 'Set 2 winner' }), 'match_moneyline');
+  // unknown shapes fall through instead of being forced into a group
+  assert.equal(g({ title: 'Who wins the coin toss?' }), 'other');
+  assert.equal(g({}), 'other');
+}
