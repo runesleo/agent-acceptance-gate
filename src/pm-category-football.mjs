@@ -5,6 +5,35 @@
 
 import { round2 } from './pm-gamma-market.mjs';
 
+/**
+ * Cross-market residual cutoffs, hoisted 2026-07-30.
+ *
+ * These were inline magic numbers. They are not wrong — labelling a market as
+ * "draw heavy" does need a cutoff — but a buyer paying per call could not see why
+ * 0.55 rather than 0.6, and could not tell a tuned threshold from a typo. The
+ * repo already has the better pattern: crypto-market-regime declares its weights
+ * and normalisation scales so they surface in the response and can be audited.
+ * Same treatment here: named, commented, echoed back on every residual via
+ * `triggered_by`, and exported so a caller can read the ruleset before trusting it.
+ *
+ * Values are unchanged from the inline versions — this is a disclosure change, not
+ * a retune. Retuning needs settled-match backtesting, which this service does not do.
+ */
+export const CROSS_MARKET_RESIDUAL_THRESHOLDS = Object.freeze({
+  /** Both moneyline sides below this = neither side is favoured. */
+  ml_side_short: 0.35,
+  /** Draw priced above this while both sides are short = draw-heavy shape. */
+  ml_draw_elevated: 0.3,
+  /** Over 2.5 above this reads as a high-scoring market. */
+  over25_rich: 0.62,
+  /** …but only counts as tension when the best moneyline side stays under this. */
+  ml_max_side_tight: 0.4,
+  /** BTTS Yes above this is rich. */
+  btts_rich: 0.6,
+  /** …and conflicts when Over 2.5 sits below this. */
+  over25_subdued: 0.45
+});
+
 const REQUIRED_GROUPS = [
   'moneyline_90m',
   'totals_ladder',
@@ -40,9 +69,8 @@ export function enrichFootballCategory({ market, eventBundle, eventMatrix, fixtu
   // Knockout often has advance on sibling — note if absent
   if (!groups.advance?.length) missing.push('advance_or_match_winner_optional');
 
-  const matrix_status = missing.filter((m) => !m.endsWith('_optional')).length
-    ? 'incomplete'
-    : 'complete';
+  const requiredMissing = missing.filter((m) => !m.endsWith('_optional'));
+  const matrix_status = requiredMissing.length ? 'incomplete' : 'complete';
 
   const moneyline = summarizeMoneyline(groups.moneyline_90m || []);
   const totals = summarizeLadder(groups.totals_ladder || [], 'totals');
@@ -54,6 +82,20 @@ export function enrichFootballCategory({ market, eventBundle, eventMatrix, fixtu
   const fixtureGate = evaluateFixtureGate(market, eventBundle, fixture);
   const shape = buildImpliedShape({ moneyline, totals, spreads, btts, advance, teamTotals, missing_market_groups: missing });
   const expressions = buildExpressionComparison({ moneyline, totals, spreads, btts, advance, shape });
+  const hard_veto_gaps = buildFootballHardVetoGaps({
+    requiredMissing,
+    fixtureGate,
+    moneyline,
+    totals,
+    expressions
+  });
+  const matrix_completeness = {
+    status: matrix_status,
+    required_groups: REQUIRED_GROUPS,
+    required_present: REQUIRED_GROUPS.filter((g) => (groups[g] || []).length > 0),
+    required_missing: requiredMissing,
+    hard_veto_gaps
+  };
 
   let tradability_cap = null;
   const tradability_reasons = [];
@@ -65,8 +107,12 @@ export function enrichFootballCategory({ market, eventBundle, eventMatrix, fixtu
     tradability_cap = tradability_cap || 'medium';
     tradability_reasons.push('football_matrix_incomplete');
   }
+  if (hard_veto_gaps.length) {
+    tradability_cap = 'weak';
+    tradability_reasons.push('football_hard_veto_gaps');
+  }
 
-  const default_action_hint = fixtureGate.fixture_status !== 'ok' || matrix_status === 'incomplete'
+  const default_action_hint = hard_veto_gaps.length || fixtureGate.fixture_status !== 'ok' || matrix_status === 'incomplete'
     ? 'no_trade'
     : 'use_decision_card_after_expression_comparison';
 
@@ -101,6 +147,8 @@ export function enrichFootballCategory({ market, eventBundle, eventMatrix, fixtu
       Object.entries(groups).map(([key, rows]) => [key, rows.length])
     ),
     matrix_status,
+    matrix_completeness,
+    hard_veto_gaps,
     missing_market_groups: missing,
     market_surface,
     market_implied_shape: shape,
@@ -119,6 +167,8 @@ export function enrichFootballCategory({ market, eventBundle, eventMatrix, fixtu
         'fixture_gate',
         'full_same_event_matrix_via_parent_event_id',
         'missing_market_groups',
+        'matrix_completeness',
+        'hard_veto_gaps',
         'market_implied_shape',
         'expression_comparison',
         'adjacent_ladder_context',
@@ -137,6 +187,25 @@ export function enrichFootballCategory({ market, eventBundle, eventMatrix, fixtu
   };
 }
 
+function buildFootballHardVetoGaps({ requiredMissing, fixtureGate, moneyline, totals, expressions }) {
+  const gaps = [];
+  if (fixtureGate?.fixture_status && fixtureGate.fixture_status !== 'ok') {
+    gaps.push(`fixture_${fixtureGate.fixture_status}`);
+  }
+  if (requiredMissing.includes('moneyline_90m') || !moneyline?.home) {
+    gaps.push('missing_moneyline_90m');
+  }
+  for (const key of requiredMissing) {
+    if (key === 'moneyline_90m') continue;
+    gaps.push(`missing_${key}`);
+  }
+  const ladderCount = expressions?.ladder_context?.totals_ladder_count ?? totals?.lines?.length ?? 0;
+  if (ladderCount < 2) {
+    gaps.push('totals_ladder_thin_or_missing');
+  }
+  return [...new Set(gaps)];
+}
+
 function buildFootballCoherence({ moneyline, totals, spreads, btts, shape, matrix_status }) {
   const residuals = [];
   const top_scorelines = [];
@@ -149,22 +218,29 @@ function buildFootballCoherence({ moneyline, totals, spreads, btts, shape, matri
     ?? null;
   const bttsYes = btts?.yes ?? null;
 
-  if (home != null && away != null && home < 0.35 && away < 0.35 && draw != null && draw > 0.3) {
+  const T = CROSS_MARKET_RESIDUAL_THRESHOLDS;
+
+  if (home != null && away != null && home < T.ml_side_short && away < T.ml_side_short
+      && draw != null && draw > T.ml_draw_elevated) {
     residuals.push({
       type: 'ml_draw_heavy',
-      note: 'Both sides short-priced with elevated draw — check if totals/spreads agree.'
+      note: 'Both sides short-priced with elevated draw — check if totals/spreads agree.',
+      triggered_by: `home<${T.ml_side_short} && away<${T.ml_side_short} && draw>${T.ml_draw_elevated}`
     });
   }
-  if (over25 != null && over25 > 0.62 && home != null && away != null && Math.max(home, away) < 0.4) {
+  if (over25 != null && over25 > T.over25_rich && home != null && away != null
+      && Math.max(home, away) < T.ml_max_side_tight) {
     residuals.push({
       type: 'totals_vs_ml_tension',
-      note: 'Market prices high Over 2.5 while ML looks tight — possible expression conflict.'
+      note: 'Market prices high Over 2.5 while ML looks tight — possible expression conflict.',
+      triggered_by: `over2.5>${T.over25_rich} && max(home,away)<${T.ml_max_side_tight}`
     });
   }
-  if (bttsYes != null && over25 != null && bttsYes > 0.6 && over25 < 0.45) {
+  if (bttsYes != null && over25 != null && bttsYes > T.btts_rich && over25 < T.over25_subdued) {
     residuals.push({
       type: 'btts_vs_totals_tension',
-      note: 'BTTS Yes rich vs subdued Over — review ladder consistency.'
+      note: 'BTTS Yes rich vs subdued Over — review ladder consistency.',
+      triggered_by: `btts>${T.btts_rich} && over2.5<${T.over25_subdued}`
     });
   }
 
@@ -196,7 +272,9 @@ function buildFootballCoherence({ moneyline, totals, spreads, btts, shape, matri
     top_scorelines,
     distribution_note: 'Not a full joint_score_distribution_90m; use as triage only.',
     market_implied_shape_ref: shape?.central_thesis ?? null,
-    spreads_present: Boolean(spreads?.count || spreads?.lines?.length)
+    spreads_present: Boolean(spreads?.count || spreads?.lines?.length),
+    // Ship the ruleset with the verdict so the buyer can audit the cutoffs.
+    residual_thresholds: { ...CROSS_MARKET_RESIDUAL_THRESHOLDS }
   };
 }
 

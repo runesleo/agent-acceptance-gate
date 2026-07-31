@@ -46,11 +46,23 @@ export function enrichWeatherCategory({ market, eventBundle, eventMatrix, snapsh
   const observed = readObserved(snapshot);
   const thesis = buildThesis({ modal, forecast, observed, yesSum, buckets });
   const ladder_status = buckets.length >= 4 ? 'complete' : (buckets.length >= 2 ? 'thin' : 'incomplete');
+  const adjacent_ladder = buildAdjacentLadderDiagnostics(buckets, modal);
+  const hard_veto_gaps = buildWeatherHardVetoGaps({
+    snapshot,
+    freshness,
+    observed,
+    ladder_status,
+    buckets,
+    yesSum
+  });
 
-  const tradability_cap = freshness.status !== 'provided' ? 'medium' : null;
+  const tradability_cap = hard_veto_gaps.length
+    ? 'weak'
+    : (freshness.status !== 'provided' ? 'medium' : null);
   const tradability_reasons = [];
   if (freshness.status !== 'provided') tradability_reasons.push('weather_source_snapshot_missing');
   if (ladder_status !== 'complete') tradability_reasons.push('weather_ladder_thin');
+  if (hard_veto_gaps.length) tradability_reasons.push('weather_hard_veto_gaps');
 
   return {
     category: 'weather',
@@ -62,6 +74,13 @@ export function enrichWeatherCategory({ market, eventBundle, eventMatrix, snapsh
     source_label: snapshot?.source_label ?? null,
     observed_temp: observed,
     ladder_status,
+    matrix_completeness: {
+      status: ladder_status === 'complete' ? 'complete' : 'incomplete',
+      bucket_count: buckets.length,
+      hard_veto_gaps
+    },
+    hard_veto_gaps,
+    adjacent_ladder,
     full_bucket_surface: buckets,
     market_implied_distribution,
     yes_mass_sum: round2(yesSum),
@@ -73,7 +92,7 @@ export function enrichWeatherCategory({ market, eventBundle, eventMatrix, snapsh
       status: 'not_computed_in_asp_v1',
       detail: 'Paper split-ladder / bankroll stays in local pm-weather-ladder skill; ASP returns ladder + optional forecast context only.'
     },
-    default_action_hint: tradability_reasons.length
+    default_action_hint: hard_veto_gaps.length || tradability_reasons.length
       ? 'no_trade_until_source_and_ladder_ok'
       : 'use_decision_card_or_local_weather_skill',
     hard_gate: 'no_orders_no_account_mutation_no_station_scrape',
@@ -85,7 +104,9 @@ export function enrichWeatherCategory({ market, eventBundle, eventMatrix, snapsh
         'full_bucket_surface',
         'market_implied_distribution',
         'optional_forecast_distribution',
-        'source_freshness_gate'
+        'source_freshness_gate',
+        'hard_veto_gaps',
+        'adjacent_ladder_diagnostics'
       ],
       excluded_local_only: [
         'station_scrape',
@@ -94,6 +115,42 @@ export function enrichWeatherCategory({ market, eventBundle, eventMatrix, snapsh
         'u_amount_from_latest_anchor'
       ]
     }
+  };
+}
+
+function buildWeatherHardVetoGaps({ snapshot, freshness, observed, ladder_status, buckets, yesSum }) {
+  const gaps = [];
+  if (!snapshot?.station) gaps.push('station_identity_missing');
+  if (!snapshot?.station_coordinates && !snapshot?.station) gaps.push('station_coordinates_missing');
+  if (freshness.status !== 'provided') gaps.push('source_snapshot_missing');
+  if (!observed) gaps.push('observed_temp_missing');
+  if (ladder_status === 'incomplete') gaps.push('ladder_incomplete');
+  if (ladder_status === 'thin') gaps.push('ladder_thin');
+  if (buckets.length && (yesSum > 1.2 || yesSum < 0.8)) gaps.push('yes_mass_incoherent');
+  return gaps;
+}
+
+function buildAdjacentLadderDiagnostics(buckets, modal) {
+  if (!buckets.length) {
+    return { status: 'unavailable', note: 'No temperature buckets on surface.' };
+  }
+  const ordered = buckets.slice().sort(compareBuckets);
+  const modalIdx = modal
+    ? ordered.findIndex((b) => b.bucket === modal.bucket || b.slug === modal.slug)
+    : -1;
+  const adjacent = modalIdx >= 0
+    ? ordered.slice(Math.max(0, modalIdx - 1), modalIdx + 2)
+    : ordered.slice(0, 3);
+  return {
+    status: ordered.length >= 3 ? 'ok' : 'thin',
+    modal_index: modalIdx,
+    adjacent_buckets: adjacent.map((b) => ({
+      bucket: b.bucket,
+      yes: b.yes,
+      ask: b.best_ask,
+      slug: b.slug
+    })),
+    note: 'Exact-degree buckets are mutually exclusive; always read adjacent buckets with the modal.'
   };
 }
 

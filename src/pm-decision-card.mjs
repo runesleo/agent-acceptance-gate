@@ -13,11 +13,14 @@ import {
 import { resolveMarketRef } from './pm-gamma-market.mjs';
 
 const SERVICE_ID = 'pm_decision_card';
-const SCHEMA_VERSION = '0.3';
+const SCHEMA_VERSION = '0.4';
 const PUBLIC_THRESHOLD_SOURCE = 'asp_public_heuristic';
-const PUBLIC_THRESHOLD_VERSION = 'v0.3';
+const PUBLIC_THRESHOLD_VERSION = 'v0.4';
 const PUBLIC_HARD_GATE = 'no_orders_no_signing_no_wallet_custody_no_leo_private_bankroll';
 const DEFAULT_FEE_BUFFER = 0.02;
+/** Caller-supplied bankroll only — never Leo private SSOT. */
+const CALLER_SIZING_AUTHORITY = 'caller_supplied_bankroll_or_size_usd';
+const B_MINUS_PROBE_BANKROLL_FRAC = 0.015;
 
 const STANDARD_CAVEATS = [
   'Decision card is a mechanical + event-context gate only. Not investment advice.',
@@ -32,6 +35,9 @@ const STANDARD_CAVEATS = [
  * @param {string} [input.condition_id]
  * @param {string} [input.side]
  * @param {number} [input.size_usd]
+ * @param {number} [input.bankroll_usd] caller-supplied only; never Leo private SSOT
+ * @param {number} [input.existing_exposure_usd]
+ * @param {number} [input.fair_prob]
  * @param {boolean} [input.include_event_context=true]
  */
 export async function assessPmDecisionCardLive(input = {}, options = {}) {
@@ -90,6 +96,7 @@ export async function assessPmDecisionCardLive(input = {}, options = {}) {
       slug: ref.slug,
       side: preflight.input?.side,
       size_usd: preflight.input?.size_usd ?? null,
+      bankroll_usd: decision.public_fields.bankroll_usd,
       include_event_context: includeEvent,
       existing_exposure_usd: decision.public_fields.existing_exposure_usd,
       decision_mode_override: normalizeDecisionMode(input.decision_mode),
@@ -102,6 +109,10 @@ export async function assessPmDecisionCardLive(input = {}, options = {}) {
     current_price: decision.public_fields.current_price,
     current_executable_ask: decision.public_fields.current_executable_ask,
     max_entry: decision.public_fields.max_entry,
+    order_quantity_shares: decision.public_fields.order_quantity_shares,
+    estimated_cost_u: decision.public_fields.estimated_cost_u,
+    sizing_role: decision.public_fields.sizing_role,
+    sizing_authority: decision.public_fields.sizing_authority,
     market_implied_prob: decision.public_fields.market_implied_prob,
     fair_prob_range: decision.public_fields.fair_prob_range,
     price_status: decision.public_fields.price_status,
@@ -122,10 +133,10 @@ export async function assessPmDecisionCardLive(input = {}, options = {}) {
     paid_checks,
     value_loop,
     agent_loop: {
-      step_1: 'Call this card with market ref + side (+ size_usd)',
-      step_2: 'If skip → stop; if watch → shrink/wait; if eligible_for_manual_review → human risk check',
-      step_3: 'Only then place order elsewhere (this ASP never routes orders)',
-      step_4: 'Re-run if > stale_after_minutes or market moved'
+      step_1: 'Call this card with market ref + side (+ optional size_usd / bankroll_usd / existing_exposure_usd)',
+      step_2: 'Read order_quantity_shares (share-first); if pending_* → supply size/bankroll or stop',
+      step_3: 'If skip → stop; if watch → shrink/wait; if eligible_for_manual_review → human risk check',
+      step_4: 'Only then place order elsewhere (this ASP never routes orders); re-run if stale'
     },
     decision_card: {
       ...preflight.decision_card_lite,
@@ -204,7 +215,12 @@ export function buildPmDecisionCardFallback(input = {}) {
     missing_evidence: ['live_market_data_unavailable', 'event_context_unavailable'],
     consistency_check: 'incomplete',
     hard_gate: PUBLIC_HARD_GATE,
-    existing_exposure_usd: parseOptionalUsd(input.existing_exposure_usd ?? input.exposure_usd)
+    existing_exposure_usd: parseOptionalUsd(input.existing_exposure_usd ?? input.exposure_usd),
+    bankroll_usd: parseOptionalUsd(input.bankroll_usd),
+    order_quantity_shares: 'pending_caller_size',
+    estimated_cost_u: null,
+    sizing_role: 'none',
+    sizing_authority: CALLER_SIZING_AUTHORITY
   };
   return {
     schema_version: SCHEMA_VERSION,
@@ -369,7 +385,10 @@ function buildPublicDecisionFields({
     readoutError,
     includeEvent
   });
-  const criticalMissing = missing_evidence.filter((item) => item !== 'existing_exposure_usd_not_supplied');
+  const criticalMissing = missing_evidence.filter((item) => ![
+    'existing_exposure_usd_not_supplied',
+    'caller_size_or_bankroll_not_supplied'
+  ].includes(item));
   const opportunity_state = inferOpportunityState({
     action,
     decision_mode,
@@ -384,6 +403,12 @@ function buildPublicDecisionFields({
     action
   });
   const threshold_role = inferThresholdRole({ opportunity_state, decision_mode, price_status });
+  const sizing = computeCallerShareFirstSizing({
+    input,
+    current_executable_ask,
+    opportunity_state,
+    action
+  });
 
   return {
     opportunity_state,
@@ -391,6 +416,10 @@ function buildPublicDecisionFields({
     current_price,
     current_executable_ask,
     max_entry,
+    order_quantity_shares: sizing.order_quantity_shares,
+    estimated_cost_u: sizing.estimated_cost_u,
+    sizing_role: sizing.sizing_role,
+    sizing_authority: sizing.sizing_authority,
     market_implied_prob,
     fair_prob_range,
     price_status,
@@ -406,7 +435,82 @@ function buildPublicDecisionFields({
     missing_evidence,
     consistency_check,
     hard_gate: PUBLIC_HARD_GATE,
-    existing_exposure_usd: parseOptionalUsd(input.existing_exposure_usd ?? input.exposure_usd)
+    existing_exposure_usd: parseOptionalUsd(input.existing_exposure_usd ?? input.exposure_usd),
+    bankroll_usd: sizing.bankroll_usd
+  };
+}
+
+/**
+ * Share-first sizing from caller-supplied bankroll/size only.
+ * Never reads Leo private bankroll SSOT. No orders.
+ */
+function computeCallerShareFirstSizing({ input, current_executable_ask, opportunity_state, action }) {
+  const bankroll_usd = parseOptionalUsd(input.bankroll_usd);
+  const size_usd = parseOptionalUsd(input.size_usd ?? input.target_cost_usd);
+  const exposure_usd = parseOptionalUsd(input.existing_exposure_usd ?? input.exposure_usd);
+  const ask = current_executable_ask;
+
+  if (action === 'skip' || ask == null || ask <= 0) {
+    return {
+      bankroll_usd,
+      order_quantity_shares: size_usd == null && bankroll_usd == null ? 'pending_caller_size' : 'pending_anchor',
+      estimated_cost_u: null,
+      sizing_role: 'none',
+      sizing_authority: CALLER_SIZING_AUTHORITY
+    };
+  }
+
+  if (size_usd == null && bankroll_usd == null) {
+    return {
+      bankroll_usd: null,
+      order_quantity_shares: 'pending_caller_size',
+      estimated_cost_u: null,
+      sizing_role: 'none',
+      sizing_authority: CALLER_SIZING_AUTHORITY
+    };
+  }
+
+  // Share math is still returned when opportunity_state=data_blocked so the
+  // caller gets an enterable quantity; missing_evidence remains the hard gate.
+
+  let targetCost = size_usd;
+  let sizing_role = 'caller_supplied';
+  if (targetCost == null && bankroll_usd != null) {
+    // Public heuristic probe envelope only — not Leo risk SSOT B_normal ceiling.
+    targetCost = Math.round(bankroll_usd * B_MINUS_PROBE_BANKROLL_FRAC * 100) / 100;
+    sizing_role = 'B_minus_probe';
+  } else if (bankroll_usd != null && size_usd != null) {
+    const frac = size_usd / bankroll_usd;
+    sizing_role = frac <= B_MINUS_PROBE_BANKROLL_FRAC + 1e-9 ? 'B_minus_probe' : 'caller_supplied';
+  }
+
+  if (exposure_usd != null && bankroll_usd != null && exposure_usd + (targetCost || 0) > bankroll_usd * 0.25) {
+    return {
+      bankroll_usd,
+      order_quantity_shares: 'pending_anchor',
+      estimated_cost_u: null,
+      sizing_role: 'none',
+      sizing_authority: CALLER_SIZING_AUTHORITY
+    };
+  }
+
+  const shares = Math.floor((targetCost || 0) / ask);
+  if (shares <= 0) {
+    return {
+      bankroll_usd,
+      order_quantity_shares: 'pending_caller_size',
+      estimated_cost_u: null,
+      sizing_role: 'none',
+      sizing_authority: CALLER_SIZING_AUTHORITY
+    };
+  }
+
+  return {
+    bankroll_usd,
+    order_quantity_shares: shares,
+    estimated_cost_u: Math.round(shares * ask * 100) / 100,
+    sizing_role,
+    sizing_authority: CALLER_SIZING_AUTHORITY
   };
 }
 
@@ -524,6 +628,12 @@ function collectMissingEvidence({
   }
   if (parseOptionalUsd(input.existing_exposure_usd ?? input.exposure_usd) === null) {
     missing.push('existing_exposure_usd_not_supplied');
+  }
+  if (
+    parseOptionalUsd(input.size_usd ?? input.target_cost_usd) === null
+    && parseOptionalUsd(input.bankroll_usd) === null
+  ) {
+    missing.push('caller_size_or_bankroll_not_supplied');
   }
   return [...new Set(missing)];
 }
