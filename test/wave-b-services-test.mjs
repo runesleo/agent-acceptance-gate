@@ -2287,3 +2287,28 @@ console.log('PASS wave-b-services-test');
   }
   assert.equal(buildAgentBudgetPreflightFallback().action, 'reject_policy');
 }
+
+// ---- unit: nba shape thresholds are disclosed --------------------------------
+// 2026-07-31: last of the three category plugins to get the treatment football and
+// tennis already had. These cutoffs decide what the buyer is told about the market
+// ("clear favorite", "ML vs spread mismatch"); inline, they were indistinguishable
+// from a typo. Values unchanged — disclosure only.
+{
+  const { enrichNbaCategory, NBA_SHAPE_THRESHOLDS } =
+    await import('../src/pm-category-nba.mjs');
+
+  assert.ok(Object.isFrozen(NBA_SHAPE_THRESHOLDS));
+  assert.equal(NBA_SHAPE_THRESHOLDS.clear_favorite, 0.62);
+  assert.equal(NBA_SHAPE_THRESHOLDS.lean_favorite, 0.55);
+  assert.equal(NBA_SHAPE_THRESHOLDS.heavy_favorite, 0.7);
+  assert.equal(NBA_SHAPE_THRESHOLDS.tight_spread_abs, 2.5);
+  assert.equal(NBA_SHAPE_THRESHOLDS.wide_spread_abs, 8);
+
+  const empty = enrichNbaCategory({
+    market: {}, eventBundle: null, eventMatrix: [], fixture: null
+  });
+  assert.deepEqual(empty.coherence.shape_thresholds, { ...NBA_SHAPE_THRESHOLDS });
+  // the response carries a copy — a caller cannot reach through it and retune the service
+  empty.coherence.shape_thresholds.clear_favorite = 0.99;
+  assert.equal(NBA_SHAPE_THRESHOLDS.clear_favorite, 0.62);
+}
