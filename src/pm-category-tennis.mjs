@@ -33,9 +33,8 @@ export function enrichTennisCategory({ market, eventBundle, eventMatrix, fixture
   if (!groups.set1_winner?.length) missing.push('set1_winner_optional');
   if (!groups.completed_match?.length) missing.push('completed_match_optional');
 
-  const matrix_status = missing.filter((m) => !m.endsWith('_optional')).length
-    ? 'incomplete'
-    : 'complete';
+  const requiredMissing = missing.filter((m) => !m.endsWith('_optional'));
+  const matrix_status = requiredMissing.length ? 'incomplete' : 'complete';
 
   const format = detectFormat(market, eventBundle, fixture);
   const moneyline = summarizeNamedMoneyline(groups.match_moneyline || [], market);
@@ -65,6 +64,19 @@ export function enrichTennisCategory({ market, eventBundle, eventMatrix, fixture
     shape,
     domination
   });
+  const hard_veto_gaps = buildTennisHardVetoGaps({
+    requiredMissing,
+    fixtureGate,
+    moneyline,
+    format
+  });
+  const matrix_completeness = {
+    status: matrix_status,
+    required_groups: REQUIRED_GROUPS,
+    required_present: REQUIRED_GROUPS.filter((g) => (groups[g] || []).length > 0),
+    required_missing: requiredMissing,
+    hard_veto_gaps
+  };
 
   let tradability_cap = null;
   const tradability_reasons = [];
@@ -76,8 +88,12 @@ export function enrichTennisCategory({ market, eventBundle, eventMatrix, fixture
     tradability_cap = tradability_cap || 'medium';
     tradability_reasons.push('tennis_matrix_incomplete');
   }
+  if (hard_veto_gaps.length) {
+    tradability_cap = 'weak';
+    tradability_reasons.push('tennis_hard_veto_gaps');
+  }
 
-  const default_action_hint = fixtureGate.fixture_status !== 'ok' || matrix_status === 'incomplete'
+  const default_action_hint = hard_veto_gaps.length || fixtureGate.fixture_status !== 'ok' || matrix_status === 'incomplete'
     ? 'no_trade'
     : (expressions.recommended
       ? 'use_decision_card_after_expression_comparison'
@@ -102,6 +118,8 @@ export function enrichTennisCategory({ market, eventBundle, eventMatrix, fixture
       Object.entries(groups).map(([key, rows]) => [key, rows.length])
     ),
     matrix_status,
+    matrix_completeness,
+    hard_veto_gaps,
     missing_market_groups: missing,
     market_surface,
     market_implied_shape: shape,
@@ -122,6 +140,8 @@ export function enrichTennisCategory({ market, eventBundle, eventMatrix, fixture
         'full_same_event_matrix',
         'named_outcome_moneyline',
         'missing_market_groups',
+        'matrix_completeness',
+        'hard_veto_gaps',
         'market_implied_shape',
         'expression_comparison',
         'straight_set_domination_check',
@@ -136,6 +156,25 @@ export function enrichTennisCategory({ market, eventBundle, eventMatrix, fixture
       ]
     }
   };
+}
+
+function buildTennisHardVetoGaps({ requiredMissing, fixtureGate, moneyline, format }) {
+  const gaps = [];
+  if (fixtureGate?.fixture_status && fixtureGate.fixture_status !== 'ok') {
+    gaps.push(`fixture_${fixtureGate.fixture_status}`);
+  }
+  const hasMl = Boolean(moneyline?.player_a || moneyline?.player_b);
+  if (requiredMissing.includes('match_moneyline') || !hasMl) {
+    gaps.push('missing_match_moneyline');
+  }
+  for (const key of requiredMissing) {
+    if (key === 'match_moneyline') continue;
+    gaps.push(`missing_${key}`);
+  }
+  if (!format?.best_of || format?.source === 'unknown') {
+    gaps.push('format_unknown');
+  }
+  return [...new Set(gaps)];
 }
 
 export function extractTennisFixture(input = {}, options = {}) {
@@ -673,11 +712,35 @@ function buildExpressionComparison({
   };
 }
 
-function scorePriceStatus(yes) {
+/**
+ * Price gate cutoffs, hoisted and exported 2026-07-30.
+ *
+ * This gate decides whether an expression may be handed to the caller as the tip:
+ * `full` / `rich` / `no_edge` are refused outright. That makes these numbers the
+ * most consequential constants in the file — they are the difference between
+ * "recommended" and "withheld" — yet they were inline and the module had no test
+ * coverage at all. Exported so a buyer can read the rail before trusting the tip,
+ * and so the boundaries can be pinned by tests.
+ *
+ * Values unchanged from the inline versions. Retuning would need settled-match
+ * backtesting, which this service does not do.
+ */
+export const TENNIS_PRICE_GATE = Object.freeze({
+  /** At or beyond this (either tail) the price is fully paid — never a tip. */
+  full: 0.85,
+  /** At or beyond this (either tail) the price is rich — never a tip. */
+  rich: 0.72,
+  /** Inside this band the price is acceptable. */
+  acceptable_low: 0.4,
+  acceptable_high: 0.6
+});
+
+export function scorePriceStatus(yes) {
+  const G = TENNIS_PRICE_GATE;
   if (yes == null || !Number.isFinite(yes)) return 'unknown';
-  if (yes >= 0.85 || yes <= 0.15) return 'full';
-  if (yes >= 0.72 || yes <= 0.28) return 'rich';
-  if (yes >= 0.4 && yes <= 0.6) return 'acceptable';
+  if (yes >= G.full || yes <= 1 - G.full) return 'full';
+  if (yes >= G.rich || yes <= 1 - G.rich) return 'rich';
+  if (yes >= G.acceptable_low && yes <= G.acceptable_high) return 'acceptable';
   return 'watch';
 }
 

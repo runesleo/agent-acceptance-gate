@@ -68,7 +68,8 @@ const SCENARIOS = {
     service_id: 'tennis_match_card',
     expected: ['tennis'],
     default_query: 'atp tennis',
-    query_variants: ['atp tennis', 'tennis', 'atp', 'wta', 'wimbledon'],
+    // Prefer multi-token tennis queries; bare "atp" alone historically mis-hit esports names like "Atputies".
+    query_variants: ['atp tennis', 'wta tennis', 'tennis match', 'wimbledon tennis', 'tennis'],
     tag_slugs: ['tennis', 'atp', 'wta'],
     category_keywords: ['tennis', 'atp', 'wta', 'wimbledon'],
     zh_name: '网球比赛卡',
@@ -562,8 +563,10 @@ function pickBestCandidate(candidates, options = {}) {
     .sort((a, b) => b.score - a.score || b.semantic_score - a.semantic_score || b.volume - a.volume);
   let pool = ranked;
   if (options.preferredSurface === 'match') {
+    // Hard gate for Match Card SKUs: never fall back to season/outright/award surfaces.
     const matchOnly = ranked.filter((c) => c.surface === 'match');
-    if (matchOnly.length) pool = matchOnly;
+    if (!matchOnly.length) return null;
+    pool = matchOnly;
   }
   const best = pool[0] ?? null;
   if (!best) return null;
@@ -636,15 +639,36 @@ function uniqueStrings(values) {
   return result;
 }
 
-function scoreCategoryMatch(blob, expected) {
+const ESPORTS_BLOB_RE = /\bcounter[-\s]?strike\b|\bcs:?go\b|\bcs2\b|\bdota\b|\bleague of legends\b|\bvalorant\b|\besports?\b|\bmap\s*\d\b/;
+
+/**
+ * Category match for scenario discovery. Word-boundary safe for short tokens
+ * like atp/wta so "Atputies" (CS) cannot score as tennis.
+ * Exported for unit tests.
+ */
+export function scoreCategoryMatch(blob, expected) {
+  const text = String(blob || '').toLowerCase();
+  if (!text || !Array.isArray(expected) || !expected.length) return 0;
+
+  const sportsExpected = expected.some((cat) => ['tennis', 'football', 'nba'].includes(cat));
+  if (sportsExpected && ESPORTS_BLOB_RE.test(text)) return 0;
+
   let score = 0;
   for (const cat of expected) {
-    if (cat === 'weather' && /temperature|weather|°f|°c|high temp/.test(blob)) score += 5;
-    if (cat === 'politics' && /president|election|nominee|senate|governor|parliament/.test(blob)) score += 5;
-    if (cat === 'macro_fed' && /fed|fomc|interest rate|bps/.test(blob)) score += 5;
-    if (cat === 'football' && /football|soccer|premier|uefa|fifa|epl|ucl/.test(blob)) score += 5;
-    if (cat === 'tennis' && /tennis|atp|wta/.test(blob)) score += 5;
-    if (cat === 'nba' && /\bnba\b|basketball/.test(blob)) score += 5;
+    if (cat === 'weather' && /\btemperature\b|\bweather\b|°f|°c|\bhigh temp\b/.test(text)) score += 5;
+    if (cat === 'politics' && /\bpresident\b|\belection\b|\bnominee\b|\bsenate\b|\bgovernor\b|\bparliament\b/.test(text)) {
+      score += 5;
+    }
+    if (cat === 'macro_fed' && /\bfed\b|\bfomc\b|\binterest rate\b|\bbps\b/.test(text)) score += 5;
+    if (cat === 'football' && (
+      /\bfootball\b|\bsoccer\b|\bpremier league\b|\buefa\b|\bfifa\b|\bepl\b|\bucl\b|\bla liga\b|\bserie a\b|\bbundesliga\b/
+    ).test(text)) {
+      score += 5;
+    }
+    if (cat === 'tennis' && (/\btennis\b|\batp\b|\bwta\b|\bwimbledon\b|\bus open\b|\broland garros\b/).test(text)) {
+      score += 5;
+    }
+    if (cat === 'nba' && (/\bnba\b|\bbasketball\b|\bwnba\b/).test(text)) score += 5;
   }
   return score;
 }

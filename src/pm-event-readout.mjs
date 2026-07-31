@@ -650,20 +650,25 @@ function detectCategory(market, eventBundle) {
     eventBundle?.description
   ].filter(Boolean).join(' ').toLowerCase();
 
-  if (/fed|fomc|federal funds|interest rates after the .+ meeting|bps increase|bps decrease/.test(blob)) {
+  // Esports first — short tokens like "atp" must not steal CS/Dota titles (e.g. "Atputies").
+  if (/\bcounter[-\s]?strike\b|\bcs:?go\b|\bcs2\b|\bdota\b|\bleague of legends\b|\bvalorant\b|\besports?\b|\bmap\s*\d\b/.test(blob)) {
+    return 'generic';
+  }
+
+  if (/\bfed\b|\bfomc\b|federal funds|interest rates after the .+ meeting|\bbps\b/.test(blob)) {
     return 'macro_fed';
   }
-  if (/tennis|atp|wta/.test(blob)) return 'tennis';
-  if (/\bnba\b|basketball|wnba/.test(blob)) return 'nba';
+  if (/\btennis\b|\batp\b|\bwta\b|\bwimbledon\b/.test(blob)) return 'tennis';
+  if (/\bnba\b|\bbasketball\b|\bwnba\b/.test(blob)) return 'nba';
   if (/\bnfl\b|super bowl|american football/.test(blob)) return 'nfl';
   if (/\bufc\b|\bmma\b|bellator|fight night/.test(blob)) return 'ufc';
-  if (/\bmlb\b|baseball|world series/.test(blob)) return 'mlb';
-  if (/football|soccer|fifa|fifwc|world.?cup|premier league|uefa|epl|ucl|la liga|serie a|bundesliga|mls\b/.test(blob)) {
+  if (/\bmlb\b|\bbaseball\b|world series/.test(blob)) return 'mlb';
+  if (/\bfootball\b|\bsoccer\b|\bfifa\b|\bfifwc\b|world.?cup|\bpremier league\b|\buefa\b|\bepl\b|\bucl\b|\bla liga\b|\bserie a\b|\bbundesliga\b|\bmls\b/.test(blob)) {
     return 'football';
   }
-  if (/temperature|weather|°f|°c|high temp/.test(blob)) return 'weather';
+  if (/\btemperature\b|\bweather\b|°f|°c|\bhigh temp\b/.test(blob)) return 'weather';
   if (/musk|elon.*tweet|tweets in|# tweets/.test(blob)) return 'musk';
-  if (/president|election|nominee|primary|senate|governor|parliament|prime minister|electoral/.test(blob)) {
+  if (/\bpresident\b|\belection\b|\bnominee\b|\bprimary\b|\bsenate\b|\bgovernor\b|\bparliament\b|prime minister|\belectoral\b/.test(blob)) {
     return 'politics';
   }
   return 'generic';
