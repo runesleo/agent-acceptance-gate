@@ -4,6 +4,36 @@
 
 import { round2 } from './pm-gamma-market.mjs';
 
+/**
+ * NBA shape and residual cutoffs, hoisted 2026-07-31.
+ *
+ * Same treatment already applied to football and tennis: these decide what a buyer is
+ * told about the market ("clear favorite", "ML vs spread mismatch"), and they were
+ * inline literals nobody could audit — indistinguishable from a typo once written.
+ * crypto-market-regime is the pattern being followed: declare the numbers, ship them
+ * with the verdict.
+ *
+ * Values unchanged. Retuning would need settled-game backtesting, which this service
+ * does not do.
+ */
+export const NBA_SHAPE_THRESHOLDS = Object.freeze({
+  /** Favourite at or above this reads as a clear favourite. */
+  clear_favorite: 0.62,
+  /** …and above this as a lean favourite; below it the ML is a coin flip. */
+  lean_favorite: 0.55,
+  /** Heavy favourite paired with a tiny spread is worth flagging. */
+  heavy_favorite: 0.7,
+  /** Spread at or under this magnitude counts as tight. */
+  tight_spread_abs: 2.5,
+  /** Near-even ML at or below this… */
+  near_even_ml: 0.55,
+  /** …paired with a spread at or above this magnitude is suspicious. */
+  wide_spread_abs: 8,
+  /** Totals pivot outside this band is extreme. */
+  totals_extreme_high: 0.7,
+  totals_extreme_low: 0.3
+});
+
 const REQUIRED_GROUPS = [
   'moneyline',
   'spreads_ladder',
@@ -365,7 +395,10 @@ function buildImpliedShape({ moneyline, spreads, totals }) {
   const totalPivot = totals?.pivot?.line ?? null;
   let central_thesis = 'Insufficient ML/spread/totals mass for a central thesis.';
   if (favoriteYes != null && favored_side) {
-    const edge = favoriteYes >= 0.62 ? 'clear favorite' : (favoriteYes >= 0.55 ? 'lean favorite' : 'coin-flip ML');
+    const S = NBA_SHAPE_THRESHOLDS;
+    const edge = favoriteYes >= S.clear_favorite
+      ? 'clear favorite'
+      : (favoriteYes >= S.lean_favorite ? 'lean favorite' : 'coin-flip ML');
     central_thesis = `${favored_side} is ${edge} (yes≈${favoriteYes})`
       + (spreadPivot != null ? `; spread pivot ${spreadPivot}` : '')
       + (totalPivot != null ? `; total pivot ${totalPivot}` : '')
@@ -387,22 +420,30 @@ function buildNbaCoherence({ moneyline, spreads, totals, matrix_status }) {
   const spreadYes = spreads?.pivot?.yes ?? null;
   const totalYes = totals?.pivot?.yes ?? null;
 
-  if (fav != null && fav >= 0.7 && spreadLine != null && Math.abs(spreadLine) <= 2.5) {
+  const S = NBA_SHAPE_THRESHOLDS;
+
+  if (fav != null && fav >= S.heavy_favorite && spreadLine != null
+      && Math.abs(spreadLine) <= S.tight_spread_abs) {
     residuals.push({
       type: 'ml_vs_spread_tight',
-      note: 'Heavy ML favorite with a tiny spread — check whether juice/alt lines are misaligned.'
+      note: 'Heavy ML favorite with a tiny spread — check whether juice/alt lines are misaligned.',
+      triggered_by: `fav>=${S.heavy_favorite} && |spread|<=${S.tight_spread_abs}`
     });
   }
-  if (fav != null && fav <= 0.55 && spreadLine != null && Math.abs(spreadLine) >= 8) {
+  if (fav != null && fav <= S.near_even_ml && spreadLine != null
+      && Math.abs(spreadLine) >= S.wide_spread_abs) {
     residuals.push({
       type: 'ml_vs_spread_wide',
-      note: 'Near-even ML with a large spread is unusual — verify team mapping.'
+      note: 'Near-even ML with a large spread is unusual — verify team mapping.',
+      triggered_by: `fav<=${S.near_even_ml} && |spread|>=${S.wide_spread_abs}`
     });
   }
-  if (totalYes != null && (totalYes > 0.7 || totalYes < 0.3) && spreads?.count) {
+  if (totalYes != null && (totalYes > S.totals_extreme_high || totalYes < S.totals_extreme_low)
+      && spreads?.count) {
     residuals.push({
       type: 'totals_extreme_vs_spread_present',
-      note: 'Totals pivot is extreme while spreads exist — confirm tipoff/context before acting.'
+      note: 'Totals pivot is extreme while spreads exist — confirm tipoff/context before acting.',
+      triggered_by: `total>${S.totals_extreme_high} || total<${S.totals_extreme_low}`
     });
   }
 
@@ -412,7 +453,9 @@ function buildNbaCoherence({ moneyline, spreads, totals, matrix_status }) {
       : (matrix_status === 'complete' ? 'ok_heuristic' : 'incomplete_matrix'),
     cross_market_residuals: residuals,
     spread_yes_at_pivot: spreadYes,
-    distribution_note: 'Heuristic only — not a player-prop or possession model.'
+    distribution_note: 'Heuristic only — not a player-prop or possession model.',
+    // Ship the ruleset with the verdict so the buyer can audit the cutoffs.
+    shape_thresholds: { ...NBA_SHAPE_THRESHOLDS }
   };
 }
 
