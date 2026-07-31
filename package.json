@@ -17,6 +17,7 @@
     "test:samples": "node ./test/run-samples.mjs",
     "test:schemas": "node ./test/schema-smoke.mjs",
     "test:http": "node ./test/http-smoke.mjs",
-    "test:x402": "node ./test/x402-worker-test.mjs"
+    "test:x402": "node ./test/x402-worker-test.mjs",
+    "check:upstream-contracts": "node scripts/check-upstream-contracts.mjs"
   }
 }
