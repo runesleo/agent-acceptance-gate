@@ -43,6 +43,7 @@ export async function assessPmWalletReportLive(input = {}, options = {}) {
   const address = profile?.input?.address || pnl?.input?.address || null;
   const action = chooseCompositeAction(pnl, brier);
   const generated_at = new Date().toISOString();
+  const evidenceState = buildEvidenceState({ profile, brier, pnl });
 
   return {
     schema_version: '0.1',
@@ -82,6 +83,8 @@ export async function assessPmWalletReportLive(input = {}, options = {}) {
         : { error: pnlR.reason?.message || 'unavailable' }
     },
     composite_action: action,
+    evidence_state: evidenceState,
+    consumer_contract: buildConsumerContract({ action, evidenceState, pnlMode }),
     buyer_summary_zh: buildZh({ address, profile, brier, pnl, action }),
     buyer_summary_en: buildEn({ address, profile, brier, pnl, action }),
     value_loop: {
@@ -117,6 +120,31 @@ export function buildPmWalletReportFallback(input = {}) {
     buyer_summary_zh: '钱包一页纸回退：上游不可用。',
     caveats: [...STANDARD_CAVEATS, 'Demo fallback.'],
     source: { provider: 'static_fallback' }
+  };
+}
+
+function buildEvidenceState({ profile, brier, pnl }) {
+  const available_layers = [];
+  if (profile) available_layers.push('profile');
+  if (brier) available_layers.push('brier');
+  if (pnl) available_layers.push('pnl_audit');
+  const all = ['profile', 'brier', 'pnl_audit'];
+  const missing_layers = all.filter((name) => !available_layers.includes(name));
+  const status = missing_layers.length === 0 ? 'live' : (available_layers.length > 0 ? 'degraded' : 'insufficient_evidence');
+  return { status, available_layers, missing_layers, sufficient_for_action: status === 'live' && Boolean(pnl) };
+}
+
+function buildConsumerContract({ action, evidenceState, pnlMode }) {
+  const degraded = evidenceState.status !== 'live';
+  return {
+    schema_version: '0.1',
+    decision: degraded ? 'do_not_autocopy' : action,
+    can_autocopy: !degraded && action === 'trust_for_copy' && pnlMode === 'full',
+    requires_human_review: degraded || action !== 'trust_for_copy',
+    readback_key: 'generated_at',
+    stale_after_minutes: 15,
+    follow_up: degraded ? 'retry_same_report_before_acting' : (action === 'distrust_claims' ? 'run_pm_pnl_audit_full_before_copying' : (pnlMode === 'quick' ? 'optional_pm_pnl_audit_full' : 'none')),
+    fail_closed_reason: degraded ? 'missing_layers:' + evidenceState.missing_layers.join(',') : null
   };
 }
 
