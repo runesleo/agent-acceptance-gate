@@ -40,11 +40,18 @@ npm run test:xagent-submission
 
 ## Deployment command
 
-After the source commit is public and Leo explicitly approves deployment:
+After the source commit is public and Leo explicitly approves deployment,
+inject the non-secret Worker variables explicitly through Wrangler:
 
 ```bash
-npm run deploy:worker
+npm run deploy:worker -- \
+  --var XAGENT_GIT_COMMIT:<exact-40-character-public-commit> \
+  --var XAGENT_PROJECT_SLUG:runesleo-agent-acceptance-gate \
+  --var XAGENT_REVIEW_ENABLED:true
 ```
+
+For a local Worker check, use the same `--var` arguments with `npx wrangler dev`.
+Shell environment variables alone are not treated as Worker bindings.
 
 After deployment, verify:
 

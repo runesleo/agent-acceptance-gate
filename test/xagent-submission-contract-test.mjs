@@ -23,6 +23,9 @@ for (const name of [
 }
 assert.match(deployment, /https:\/\/api\.leolabs\.me\/health/);
 assert.match(deployment, /not yet deployed/i);
+assert.match(deployment, /--var XAGENT_GIT_COMMIT:/);
+assert.match(deployment, /--var XAGENT_PROJECT_SLUG:runesleo-agent-acceptance-gate/);
+assert.match(deployment, /--var XAGENT_REVIEW_ENABLED:true/);
 assert.doesNotMatch(deployment, /No public API endpoint\./);
 assert.doesNotMatch(readme, /No public endpoint exists\./);
 assert.match(reviewEnv, /XAGENT_GIT_COMMIT=[0-9a-f]{40}/);
