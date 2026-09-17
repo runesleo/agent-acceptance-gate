@@ -2,13 +2,15 @@
 
 Created: 2026-07-02
 Owner thread: product_distribution / cmd5
-Status: local_only_asp_package
+Status: live_worker_api_x402; X-Agent patch local_only_not_deployed
 
 ## Bottom line
 
-`Agent Acceptance Gate` is a candidate OKX.AI A2MCP service.
+`Agent Acceptance Gate` is a live OKX.AI/A2MCP service and an X-Agent MCP Hackathon reuse candidate.
 
 It checks whether an AI agent transaction can continue before task acceptance, paid service calls, delivery acceptance, payment release, or dispute review.
+
+The public Worker is live at `https://api.leolabs.me`. The X-Agent version-binding and reviewer route in the isolated preparation branch are not yet deployed; public deployment, push, and submission remain explicit owner gates.
 
 The service does not execute wallet actions, agent tasks, repo mutations, or deployments. It reads a task prompt, writeback, artifact list, changed files, validation output, declared hard gates, and next gate. It returns a structured verdict.
 
@@ -43,6 +45,7 @@ The first sellable wedge is delivery acceptance. The larger product is an agent 
 - `discovery/agent-service.json` - agent/service discovery metadata.
 - `discovery/mcp-tool-manifest.json` - MCP-style tool manifest.
 - `openapi.yaml` - HTTP API contract.
+- `config/xagent-review.env.example` - non-secret deployment identity example for the bounded X-Agent review surface.
 - `agent-market-ecosystem-analysis-cn.md` - market/ecosystem analysis in Chinese.
 - `go-no-go.md` - launch decision and hard gates.
 
@@ -164,7 +167,7 @@ Do not proceed without explicit Leo approval for:
 - OKX API credential or Onchain OS production configuration;
 - receiving wallet address;
 - funding, signing, transaction, staking, or payment setup;
-- public endpoint deploy;
+- deployment of new Worker code or X-Agent review routes;
 - ASP listing submission;
 - OKX.AI terms / price / payment terms;
 - push / deploy / public publish of any related website asset.

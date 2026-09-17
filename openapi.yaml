@@ -1,22 +1,92 @@
 openapi: 3.1.0
 info:
   title: Agent Acceptance Gate
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Local-only API draft for checking whether an AI agent transaction can
-    continue before task acceptance, paid service calls, delivery acceptance,
-    payment release, or dispute review. Not deployed as a public API, not
-    connected to OKX, wallet, or payment middleware.
+    Public, read-only decision-support API for checking whether an AI agent
+    delivery can continue to acceptance. The production Worker is deployed at
+    api.leolabs.me; normal paid service routes retain their existing x402
+    contract. The X-Agent reviewer route is enabled only when
+    XAGENT_REVIEW_ENABLED=true. The service never signs, settles, trades, or
+    mutates a repository or user account.
 servers:
+  - url: https://api.leolabs.me
+    description: Production Cloudflare Worker
   - url: http://127.0.0.1:8787
     description: Local development server
 paths:
   /health:
     get:
-      summary: Health check
+      summary: Health check with deployed source commit
       responses:
         "200":
-          description: Service status
+          description: Service is healthy and version-bound
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, commit]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+                  commit:
+                    type: string
+                    pattern: '^[0-9a-f]{40}$'
+        "503":
+          description: Deployment identity is missing or invalid
+  /.well-known/xagent-verification.json:
+    get:
+      summary: X-Agent same-origin deployment proof
+      responses:
+        "200":
+          description: Submission slug and deployed source commit
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schemaVersion, slug, commit]
+                properties:
+                  schemaVersion:
+                    type: integer
+                    const: 1
+                  slug:
+                    type: string
+                  commit:
+                    type: string
+                    pattern: '^[0-9a-f]{40}$'
+        "503":
+          description: Deployment identity is missing or invalid
+  /xagent/agent-delivery-acceptance-audit:
+    post:
+      summary: Reviewer-accessible agent delivery audit
+      description: |
+        Free review surface for the X-Agent submission. It is available only
+        while XAGENT_REVIEW_ENABLED=true and does not change the existing x402
+        contract of /agent-delivery-acceptance-audit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompactAuditRequest"
+      responses:
+        "200":
+          description: Structured audit result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditResponse"
+        "400":
+          description: Invalid audit input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Review route is disabled
+        "503":
+          description: Deployment identity is missing or invalid
   /api/sample-audits:
     get:
       summary: Return bundled sample audits
@@ -135,6 +205,48 @@ paths:
           description: Market pulse report
 components:
   schemas:
+    CompactAuditRequest:
+      type: object
+      required: [task, delivery_summary]
+      properties:
+        task:
+          oneOf:
+            - type: string
+            - type: object
+        delivery_summary:
+          type: string
+        artifacts:
+          type: array
+          items:
+            type: string
+        changed_files:
+          type: array
+          items:
+            type: string
+        validation:
+          type: array
+          items:
+            type: string
+        validation_output:
+          type: string
+        rollback_plan:
+          type: string
+        hard_gates:
+          type: array
+          items:
+            type: string
+        next_gate:
+          type: string
+        context:
+          type: object
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
     AuditRequest:
       type: object
       required: [schema_version, mode, task, delivery, context]

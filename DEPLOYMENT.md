@@ -1,53 +1,65 @@
 # Deployment
 
-Status: static_demo_public
-Provider: Cloudflare Pages
-Project: agent-acceptance-gate
-Production URL: https://agent-acceptance-gate.pages.dev/
-Deployment URL: https://f2449aa0.agent-acceptance-gate.pages.dev
-Deployment id: f2449aa0-ebe2-42a5-801a-7056392fccaa
-Source commit: 87599c8
-Deployed at: 2026-07-02
+Status: worker_api_live_xagent_patch_local_only
 
-## What is live
+## Public surfaces currently live
 
-Only the static buyer-facing demo from `demo/index.html` is public.
+- Static demo: https://agent-acceptance-gate.pages.dev/
+- Cloudflare Worker API: https://api.leolabs.me
+- Current production health: https://api.leolabs.me/health
+- Existing paid service catalogue: https://api.leolabs.me/api/okx-ai-services
 
-Current public positioning:
+The existing Worker API is live. The X-Agent commit-bound health response,
+same-origin verification document, and reviewer POST route prepared on
+`codex/xagent-mcp-hackathon-prep-20260917` are **not yet deployed**.
 
-```text
-Agent Acceptance Gate
-Agent 接任务、花预算、交付、放款或争议前，先判断交易能不能继续。
-```
+## X-Agent deployment identity
 
-## What is not live
-
-- No public API endpoint.
-- No wallet.
-- No payment middleware.
-- No OKX.AI ASP listing.
-- No API keys, credentials, or account integrations.
-- No GitHub remote or push.
-
-## Verification
+A review deployment must set all three values. Start from
+`config/xagent-review.env.example` and bind the exact public source commit:
 
 ```text
-curl -I https://agent-acceptance-gate.pages.dev/
-HTTP/2 200
-content-type: text/html; charset=utf-8
+XAGENT_GIT_COMMIT=<exact 40-character public Git commit deployed>
+XAGENT_PROJECT_SLUG=runesleo-agent-acceptance-gate
+XAGENT_REVIEW_ENABLED=true
 ```
 
-Cloudflare Pages deployment list shows:
+`XAGENT_GIT_COMMIT` must match the public source commit submitted for review.
+With a missing or malformed commit, `/health` and the verification endpoint
+fail closed with HTTP 503. When `XAGENT_REVIEW_ENABLED` is unset or false, the
+reviewer POST route returns HTTP 404 and the existing x402 route remains intact.
 
-```text
-Environment: Production
-Branch: main
-Source: f8baa45
-Deployment: https://f2449aa0.agent-acceptance-gate.pages.dev
+## Local verification
+
+```bash
+npm test
+npm run worker:check
+npm run test:xagent
+npm run test:xagent-submission
 ```
+
+## Deployment command
+
+After the source commit is public and Leo explicitly approves deployment:
+
+```bash
+npm run deploy:worker
+```
+
+After deployment, verify:
+
+```bash
+curl --fail --silent --show-error https://api.leolabs.me/health
+curl --fail --silent --show-error https://api.leolabs.me/.well-known/xagent-verification.json
+```
+
+The two responses must expose the same exact 40-character commit as the public
+review commit. A reviewer capability call is documented in the submission
+verification packet.
 
 ## Rollback
 
-Rollback must be done through Cloudflare Pages dashboard or a new `wrangler pages deploy demo --project-name agent-acceptance-gate` deployment.
-
-Do not delete the Cloudflare project or change visibility without explicit Leo approval.
+Rollback means redeploying the previously verified Worker source and restoring
+its prior environment configuration. Do not deploy, alter Worker variables,
+push source, or open the official submission PR without explicit Leo approval.
+The static Pages demo is a separate surface and is not changed by this patch.

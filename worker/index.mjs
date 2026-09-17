@@ -266,11 +266,41 @@ export default {
       const url = new URL(request.url);
 
       if (request.method === 'GET' && url.pathname === '/health') {
+        const identity = xAgentDeploymentIdentity(env);
+        if (!identity.ok) {
+          return json({
+            status: 'misconfigured',
+            commit: null,
+            error: identity.error
+          }, 503);
+        }
         return json({
+          status: 'ok',
+          commit: identity.commit,
           ok: true,
           service: 'agent-acceptance-gate',
           mode: 'edge_worker',
           launch_lane: 'okx_ai_asp'
+        });
+      }
+
+      if (
+        request.method === 'GET'
+        && url.pathname === '/.well-known/xagent-verification.json'
+      ) {
+        const identity = xAgentDeploymentIdentity(env);
+        if (!identity.ok) {
+          return json({
+            schemaVersion: 1,
+            slug: identity.slug,
+            commit: null,
+            error: identity.error
+          }, 503);
+        }
+        return json({
+          schemaVersion: 1,
+          slug: identity.slug,
+          commit: identity.commit
         });
       }
 
@@ -322,6 +352,26 @@ export default {
           },
           services: [...listed, ...unlisted]
         });
+      }
+
+      if (
+        request.method === 'POST'
+        && url.pathname === '/xagent/agent-delivery-acceptance-audit'
+      ) {
+        if (!isXAgentReviewEnabled(env)) {
+          return json({
+            error: 'not_found',
+            message: 'X-Agent review capability is disabled.'
+          }, 404);
+        }
+        const identity = xAgentDeploymentIdentity(env);
+        if (!identity.ok) {
+          return json({
+            error: 'misconfigured',
+            message: identity.error
+          }, 503);
+        }
+        return json(runDeliveryAcceptanceAudit(await readJson(request)));
       }
 
       if (request.method === 'GET' && PAID_RADAR_ROUTES[url.pathname]) {
@@ -1026,6 +1076,35 @@ async function readJson(request) {
     throw new Error('Request body too large');
   }
   return JSON.parse(text);
+}
+
+function isXAgentReviewEnabled(env) {
+  return String(env?.XAGENT_REVIEW_ENABLED ?? '').trim().toLowerCase() === 'true';
+}
+
+function xAgentDeploymentIdentity(env) {
+  const commit = String(env?.XAGENT_GIT_COMMIT ?? '').trim().toLowerCase();
+  const slug = String(
+    env?.XAGENT_PROJECT_SLUG ?? 'runesleo-agent-acceptance-gate'
+  ).trim().toLowerCase();
+
+  if (!/^[0-9a-f]{40}$/.test(commit)) {
+    return {
+      ok: false,
+      slug,
+      commit: null,
+      error: 'XAGENT_GIT_COMMIT must be the exact 40-character deployed Git commit.'
+    };
+  }
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+    return {
+      ok: false,
+      slug,
+      commit: null,
+      error: 'XAGENT_PROJECT_SLUG must be a lowercase kebab-case slug.'
+    };
+  }
+  return { ok: true, slug, commit };
 }
 
 function json(payload, status = 200, extraHeaders = undefined) {
