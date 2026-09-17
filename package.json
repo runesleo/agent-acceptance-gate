@@ -21,5 +21,8 @@
     "check:upstream-contracts": "node scripts/check-upstream-contracts.mjs",
     "test:xagent": "node ./test/xagent-contract-test.mjs",
     "test:xagent-submission": "node ./test/xagent-submission-contract-test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.133.0"
   }
 }

@@ -8,6 +8,12 @@ const reviewEnv = fs.readFileSync(
   new URL('../config/xagent-review.env.example', import.meta.url),
   'utf8'
 );
+const packageJson = JSON.parse(
+  fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+);
+const packageLock = JSON.parse(
+  fs.readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8')
+);
 
 assert.match(openapi, /https:\/\/api\.leolabs\.me/);
 assert.match(openapi, /\/\.well-known\/xagent-verification\.json:/);
@@ -31,5 +37,7 @@ assert.doesNotMatch(readme, /No public endpoint exists\./);
 assert.match(reviewEnv, /XAGENT_GIT_COMMIT=[0-9a-f]{40}/);
 assert.match(reviewEnv, /XAGENT_PROJECT_SLUG=runesleo-agent-acceptance-gate/);
 assert.match(reviewEnv, /XAGENT_REVIEW_ENABLED=false/);
+assert.equal(packageJson.devDependencies.wrangler, '4.133.0');
+assert.equal(packageLock.packages[''].devDependencies.wrangler, '4.133.0');
 
 console.log('PASS X-Agent submission documentation contract');
